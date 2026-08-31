@@ -98,6 +98,29 @@ scripts/prepare_brats2021_main.py
 scripts/prepare_ctrate_main.py
 ```
 
+### Canonical CT-RATE V2 for full-volume generation
+
+The legacy CT-RATE preparation script only resized image indices and is kept
+for backward compatibility. For a full-volume generation experiment, prepare a
+new corpus with a fixed physical grid instead:
+
+```bash
+python scripts/prepare_ctrate_v2.py \
+  --files-root /path/to/ctrate/files \
+  --train-reports /path/to/train_reports.csv \
+  --valid-reports /path/to/valid_reports.csv \
+  --output-root /path/to/ctrate_report_ct_v2 \
+  --target-spacing-mm 1.5 --xy-shape 256 256 --workers 8
+```
+
+V2 reorients each scan to RAS, resamples to `1.5 mm` isotropic voxels, uses a
+fixed `384 mm × 384 mm` in-plane field of view, and retains complete z extent.
+Train it with
+`configs/experiments/main5task_feedforward_lora_all_xy256_z65_ctrate_v2.yaml`.
+Generation still uses 65-slice windows for memory efficiency, but now receives
+normalized window position and extent; inference covers the complete z axis
+with overlap blending. Do not mix V1 and V2 volumes within an experiment.
+
 The formal split sizes are:
 
 | Dataset / task | Train | Validation | Test |

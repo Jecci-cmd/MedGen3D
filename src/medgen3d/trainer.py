@@ -103,6 +103,21 @@ class FlowTrainer:
             values.append(float(views) / full_views if views is not None else 0.0)
         return torch.tensor(values, device=self.device, dtype=torch.float32)
 
+    def _volume_position(self, batch: dict[str, Any]) -> torch.Tensor:
+        """Return normalized [z-start, z-extent] for generation windows.
+
+        Non-generation tasks deliberately receive zeros to preserve their prior
+        conditioning behaviour.
+        """
+        values = []
+        for task, metadata in zip(batch.get("task", []), batch.get("metadata", [])):
+            if task == "generation":
+                values.append((float(metadata.get("z_start_fraction", 0.0)),
+                               float(metadata.get("z_extent_fraction", 0.0))))
+            else:
+                values.append((0.0, 0.0))
+        return torch.tensor(values, device=self.device, dtype=torch.float32)
+
     def _model_checkpoint_payload(self) -> tuple[dict[str, torch.Tensor], str]:
         """Avoid duplicating frozen 5B weights in parameter-efficient checkpoints."""
         named_parameters = dict(self.model.named_parameters())
@@ -124,7 +139,11 @@ class FlowTrainer:
         if checkpoint_format == "trainable_only":
             trainable_names = {name for name, parameter in self.model.named_parameters()
                                if parameter.requires_grad}
-            missing_trainable = trainable_names.intersection(incompatible.missing_keys)
+            # Pre-position-conditioning adapter checkpoints are valid initial
+            # states: the new branch is zero-initialized and starts learning on
+            # the V2 corpus.
+            optional = {name for name in trainable_names if name.startswith("position_embedding.")}
+            missing_trainable = (trainable_names - optional).intersection(incompatible.missing_keys)
             if incompatible.unexpected_keys or missing_trainable:
                 raise RuntimeError(
                     f"Invalid adapter checkpoint: unexpected={incompatible.unexpected_keys}, "
@@ -151,7 +170,7 @@ class FlowTrainer:
                    if self.autocast_dtype is not None else nullcontext())
         with context:
             prediction = self.model(flow.noisy_target, flow.clean_condition, flow.timestep,
-                                    text_context, self._view_ratio(batch))
+                                    text_context, self._view_ratio(batch), self._volume_position(batch))
             mask = batch.get("latent_valid_mask", batch.get("valid_mask")) if self.config.get("use_padding_loss_mask", True) else None
             if mask is not None: mask=mask.to(self.device)
             if mask is not None and mask.shape[-3:] != prediction.shape[-3:]:
@@ -206,7 +225,7 @@ class FlowTrainer:
                    if self.autocast_dtype is not None else nullcontext())
         with context:
             prediction = self.model(flow.noisy_target, flow.clean_condition, flow.timestep,
-                                    text_context, self._view_ratio(batch))
+                                    text_context, self._view_ratio(batch), self._volume_position(batch))
         if mask is not None:
             mask = mask.to(self.device)
             if mask.shape[-3:] != prediction.shape[-3:]:
@@ -421,7 +440,8 @@ class FeedForwardTrainer(FlowTrainer):
             (zc.shape[0],), float(self.config.get("fixed_timestep", 0.0)),
             device=zc.device, dtype=torch.float32,
         )
-        return self.model(zc, torch.zeros_like(zc), timestep, text_context, self._view_ratio(batch))
+        return self.model(zc, torch.zeros_like(zc), timestep, text_context,
+                          self._view_ratio(batch), self._volume_position(batch))
 
     def train_microbatch(self, batch: dict[str, Any], text_context: Any | None = None) -> float:
         self.model.train()

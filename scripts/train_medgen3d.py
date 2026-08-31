@@ -35,7 +35,7 @@ from medgen3d.numerics import pad_volume
 class MockDiT(nn.Module):
     def __init__(self, channels: int = 4) -> None:
         super().__init__(); self.net=nn.Conv3d(channels*2,channels,1)
-    def forward(self,z,condition,timestep,text,view_ratio=None): return self.net(torch.cat([z,condition],1))
+    def forward(self,z,condition,timestep,text,view_ratio=None,volume_position=None): return self.net(torch.cat([z,condition],1))
 
 
 def main() -> None:

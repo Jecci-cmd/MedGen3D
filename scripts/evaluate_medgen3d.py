@@ -24,7 +24,11 @@ from medgen3d.evaluation import (
     summarize_paired_ct,
     synthesis_metrics,
 )
-from medgen3d.inference import predict_feed_forward_volume, predict_volume
+from medgen3d.inference import (
+    predict_feed_forward_sliding_volume,
+    predict_feed_forward_volume,
+    predict_volume,
+)
 from medgen3d.wan import (FrozenTextEncoder, FrozenWanVAE, MedicalWanDiT,
                           configure_dit_finetuning, load_official_components)
 
@@ -64,7 +68,8 @@ def load_trained_model(checkpoint_dir: Path, checkpoint: Path, device: torch.dev
     if checkpoint_format == "trainable_only":
         trainable_names = {name for name, parameter in model.named_parameters()
                            if parameter.requires_grad}
-        missing_trainable = trainable_names.intersection(incompatible.missing_keys)
+        optional = {name for name in trainable_names if name.startswith("position_embedding.")}
+        missing_trainable = (trainable_names - optional).intersection(incompatible.missing_keys)
         if incompatible.unexpected_keys or missing_trainable:
             raise RuntimeError(
                 f"Invalid adapter checkpoint: unexpected={incompatible.unexpected_keys}, "
@@ -121,6 +126,21 @@ def save_original_grid_volume(
     return pred_metric, target_metric
 
 
+def save_canonical_generation_volume(
+    prediction: np.ndarray, metadata: dict[str, Any], output: Path
+) -> None:
+    """Save a full V2 generation volume without inventing missing z slices."""
+    import nibabel as nib
+
+    inverse = metadata["inverse_transform"]
+    expected_dhw = tuple(reversed(tuple(int(x) for x in inverse["canonical_shape_xyz"])))
+    if tuple(prediction.shape) != expected_dhw:
+        raise ValueError(f"Expected complete canonical volume {expected_dhw}, got {prediction.shape}")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    xyz = np.moveaxis(np.clip(prediction, -1.0, 1.0) * 1000.0, (0, 1, 2), (2, 1, 0))
+    nib.save(nib.Nifti1Image(xyz.astype(np.float32), np.asarray(inverse["canonical_affine"])), output)
+
+
 def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -163,7 +183,7 @@ def main() -> None:
     for task in args.tasks:
         dataset = build_task_dataset(
             data, task, "test", seed=args.seed,
-            num_samples=args.samples_per_task, training=False,
+            num_samples=args.samples_per_task, training=False, whole_volume=task == "generation",
         )
         for index in range(args.shard_index, args.samples_per_task, args.num_shards):
             if (task, index) in completed:
@@ -174,12 +194,25 @@ def main() -> None:
             reconstruction_views = sample.get("metadata", {}).get("reconstruction_views")
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 if objective == "feed_forward_latent_regression":
-                    prediction, _ = predict_feed_forward_volume(
-                        condition, sample["prompt"], vae, text_encoder, model,
-                        reconstruction_views=reconstruction_views,
-                        full_views=int(data.get("reconstruction", {}).get("full_views", 720)),
-                        fixed_timestep=float(train.get("fixed_timestep", 0.0)),
-                    )
+                    if task == "generation":
+                        prediction = predict_feed_forward_sliding_volume(
+                            condition, sample["prompt"], vae, text_encoder, model,
+                            window_depth=int(data["patch_size_dhw"][0]),
+                            stride=int(data.get("sliding_window", {}).get("stride", data["patch_size_dhw"][0])),
+                            fixed_timestep=float(train.get("fixed_timestep", 0.0)),
+                        )
+                    else:
+                        position = torch.tensor([[
+                            float(sample["metadata"].get("z_start_fraction", 0.0)),
+                            float(sample["metadata"].get("z_extent_fraction", 0.0)),
+                        ]], device=device)
+                        prediction, _ = predict_feed_forward_volume(
+                            condition, sample["prompt"], vae, text_encoder, model,
+                            reconstruction_views=reconstruction_views,
+                            full_views=int(data.get("reconstruction", {}).get("full_views", 720)),
+                            fixed_timestep=float(train.get("fixed_timestep", 0.0)),
+                            volume_position=position,
+                        )
                 else:
                     prediction, _ = predict_volume(
                         condition, sample["prompt"], vae, text_encoder, model,
@@ -212,14 +245,22 @@ def main() -> None:
                 save_triplanar_ct(condition_hu, pred_hu, target_hu, artifact)
             else:
                 volume_path = output_dir / "volumes" / task / f"{case_id}.nii.gz"
-                pred_metric, target_metric = save_original_grid_volume(
-                    pred, sample["metadata"], task, volume_path
-                )
                 if task == "synthesis":
+                    pred_metric, target_metric = save_original_grid_volume(
+                        pred, sample["metadata"], task, volume_path
+                    )
                     metrics = synthesis_metrics(pred_metric, target_metric, data_range=1.0)
                 else:
                     # FID/FVD-CT are dataset-level distribution metrics. They are
                     # computed from the saved volumes by evaluate_generation_metrics.py.
+                    inverse = sample["metadata"]["inverse_transform"]
+                    if "canonical_shape_xyz" in inverse:
+                        save_canonical_generation_volume(pred, sample["metadata"], volume_path)
+                    else:
+                        # Legacy data has no physical canonical grid. This
+                        # branch preserves backward compatibility only; it is
+                        # not the V2 full-volume evaluation protocol.
+                        save_original_grid_volume(pred, sample["metadata"], task, volume_path)
                     metrics = {}
                 save_triplanar_ct(condition_np, pred, target, artifact)
 
@@ -231,7 +272,9 @@ def main() -> None:
                    "class_id": sample.get("metadata", {}).get("class_id")}
             if task == "generation":
                 row["volume"] = str(volume_path)
-                row["target_volume"] = str(sample["metadata"]["inverse_transform"]["target_path"])
+                row["target_volume"] = str(sample["metadata"]["inverse_transform"].get(
+                    "canonical_target_path", sample["metadata"]["inverse_transform"]["target_path"]
+                ))
             rows.append(row)
             print(json.dumps(row, sort_keys=True), flush=True)
             write_json_atomic(partial_path, {

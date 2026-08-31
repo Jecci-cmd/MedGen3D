@@ -221,6 +221,7 @@ class ManifestVolumeDataset(Dataset[dict[str, Any]]):
         spatial_flip_probability: float = 0.0,
         volume_shape_dhw: Sequence[int] | None = None,
         sliding_window_stride: int | None = None,
+        whole_volume: bool = False,
         seed: int = 0,
     ) -> None:
         if task not in VOLUME_TASKS:
@@ -252,6 +253,7 @@ class ManifestVolumeDataset(Dataset[dict[str, Any]]):
             if not record.get("patient_id"):
                 raise ValueError(f"Manifest record has no patient_id: {record.get('case_id')}")
         self.num_samples = len(self.records) if num_samples is None else int(num_samples)
+        self.whole_volume = bool(whole_volume)
         if self.num_samples <= 0:
             raise ValueError("num_samples must be positive")
 
@@ -278,17 +280,19 @@ class ManifestVolumeDataset(Dataset[dict[str, Any]]):
         if record.get("valid_mask"):
             valid = _load_array(self.root, record["valid_mask"]).astype(np.float32, copy=True)
             valid = valid[None] if valid.ndim == 3 else valid
-        starts = _sliding_window_starts(
-            condition.shape[-3], self.volume_shape[0], self.sliding_window_stride
-        )
-        if self.training:
-            cycle = index // len(self.records)
-            z_start = starts[cycle % len(starts)]
+        full_depth = int(condition.shape[-3])
+        starts = _sliding_window_starts(full_depth, self.volume_shape[0], self.sliding_window_stride)
+        if self.whole_volume:
+            z_start = 0
         else:
-            z_start = starts[len(starts) // 2]
-        condition = _crop_or_pad_depth(condition, z_start, self.volume_shape[0], -1.0)
-        target = _crop_or_pad_depth(target, z_start, self.volume_shape[0], -1.0)
-        valid = _crop_or_pad_depth(valid, z_start, self.volume_shape[0], 0.0)
+            if self.training:
+                cycle = index // len(self.records)
+                z_start = starts[cycle % len(starts)]
+            else:
+                z_start = starts[len(starts) // 2]
+            condition = _crop_or_pad_depth(condition, z_start, self.volume_shape[0], -1.0)
+            target = _crop_or_pad_depth(target, z_start, self.volume_shape[0], -1.0)
+            valid = _crop_or_pad_depth(valid, z_start, self.volume_shape[0], 0.0)
         if self.training and self.flip_probability:
             rng = np.random.default_rng(stable_seed(self.seed, self.task, str(index)))
             for axis in (-1, -2, -3):
@@ -306,6 +310,9 @@ class ManifestVolumeDataset(Dataset[dict[str, Any]]):
             "sliding_window_start_z": z_start,
             "sliding_window_depth": self.volume_shape[0],
             "sliding_window_stride": self.sliding_window_stride,
+            "full_depth": full_depth,
+            "z_start_fraction": z_start / max(full_depth - self.volume_shape[0], 1),
+            "z_extent_fraction": min(self.volume_shape[0], full_depth) / max(full_depth, 1),
         })
         return {
             "case_id": str(record["case_id"]),
@@ -345,6 +352,7 @@ class BalancedMultiTaskDataset(Dataset[dict[str, Any]]):
 def build_task_dataset(
     data: dict[str, Any], task: str, split: str, *, seed: int,
     num_samples: int | None = None, training: bool | None = None,
+    whole_volume: bool = False,
 ) -> Dataset:
     """Construct one task without leaking task-specific paths into trainers."""
     if task in CT_TASKS:
@@ -395,6 +403,7 @@ def build_task_dataset(
             spatial_flip_probability=(spec.get("spatial_flip_probability", 0.0) if split == "train" else 0.0),
             volume_shape_dhw=data.get("patch_size_dhw"),
             sliding_window_stride=data.get("sliding_window", {}).get("stride"),
+            whole_volume=whole_volume,
             seed=seed,
         )
     raise ValueError(f"Unknown task {task}")

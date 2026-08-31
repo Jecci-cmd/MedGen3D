@@ -196,7 +196,8 @@ class MedicalWanDiT(nn.Module):
     conditioning_mode = "full_volume"
 
     def __init__(self, base: nn.Module, latent_channels: int | None = None,
-                 timestep_scale: float = 1000.0, view_fourier_bands: int = 8) -> None:
+                 timestep_scale: float = 1000.0, view_fourier_bands: int = 8,
+                 position_fourier_bands: int = 8) -> None:
         super().__init__()
         self.base = base
         channels = latent_channels or int(base.in_dim)
@@ -216,6 +217,14 @@ class MedicalWanDiT(nn.Module):
         )
         nn.init.zeros_(self.view_embedding[-1].weight)
         nn.init.zeros_(self.view_embedding[-1].bias)
+        self.register_buffer("position_frequencies", 2.0 ** torch.arange(position_fourier_bands), persistent=False)
+        self.position_embedding = nn.Sequential(
+            nn.Linear(4 * position_fourier_bands + 2, base.dim),
+            nn.SiLU(),
+            nn.Linear(base.dim, base.dim),
+        )
+        nn.init.zeros_(self.position_embedding[-1].weight)
+        nn.init.zeros_(self.position_embedding[-1].bias)
         self.timestep_scale = float(timestep_scale)
 
     def enable_gradient_checkpointing(self, enabled: bool = True) -> None:
@@ -223,7 +232,8 @@ class MedicalWanDiT(nn.Module):
 
     def forward(self, noisy_target_latent: torch.Tensor, condition_latent: torch.Tensor,
                 timestep: torch.Tensor, text_context: Sequence[torch.Tensor],
-                view_ratio: torch.Tensor | None = None) -> torch.Tensor:
+                view_ratio: torch.Tensor | None = None,
+                volume_position: torch.Tensor | None = None) -> torch.Tensor:
         if noisy_target_latent.shape != condition_latent.shape:
             raise ValueError("Target and condition latent shapes must match exactly")
         if noisy_target_latent.ndim != 5:
@@ -254,7 +264,17 @@ class MedicalWanDiT(nn.Module):
                 torch.sin(angles), torch.cos(angles), view_ratio[:, None], active[:, None]
             ], dim=1)
             view_condition = self.view_embedding(view_features).to(e.dtype)
-            e = e + view_condition[:, None, :]
+            if volume_position is None:
+                volume_position = torch.zeros(b, 2, device=timestep.device)
+            volume_position = volume_position.to(device=timestep.device, dtype=torch.float32)
+            if volume_position.shape != (b, 2):
+                raise ValueError(f"Expected volume positions [B,2], got {tuple(volume_position.shape)}")
+            position_angles = 2 * math.pi * volume_position[:, :, None] * self.position_frequencies[None, None].float()
+            position_features = torch.cat([
+                torch.sin(position_angles).flatten(1), torch.cos(position_angles).flatten(1), volume_position
+            ], dim=1)
+            position_condition = self.position_embedding(position_features).to(e.dtype)
+            e = e + view_condition[:, None, :] + position_condition[:, None, :]
             e0 = self.base.time_projection(e).unflatten(2, (6, self.base.dim))
         context = self.base.text_embedding(torch.stack([
             torch.cat([u, u.new_zeros(self.base.text_len - u.shape[0], u.shape[1])]) for u in text_context
@@ -275,6 +295,8 @@ class MedicalWanDiT(nn.Module):
             "condition_patch_embedding.weight": self.condition_patch_embedding.weight.detach().cpu(),
             **{f"view_embedding.{key}": value.detach().cpu()
                for key, value in self.view_embedding.state_dict().items()},
+            **{f"position_embedding.{key}": value.detach().cpu()
+               for key, value in self.position_embedding.state_dict().items()},
         }
 
 
@@ -298,6 +320,7 @@ def configure_dit_finetuning(model: MedicalWanDiT, config: dict[str, Any]) -> li
     # pretrained counterpart, so train them together with the adapters.
     model.condition_patch_embedding.requires_grad_(True)
     model.view_embedding.requires_grad_(True)
+    model.position_embedding.requires_grad_(True)
     return [f"base.{name}" for name in replaced]
 
 
