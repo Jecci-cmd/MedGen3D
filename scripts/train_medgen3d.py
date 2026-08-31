@@ -41,7 +41,7 @@ class MockDiT(nn.Module):
 def main() -> None:
     parser=argparse.ArgumentParser(); parser.add_argument(
         "--config", type=Path,
-        default=Path("configs/experiments/main5task_feedforward_h200x8.yaml"),
+        default=Path("configs/experiments/main5task_feedforward_lora_all_xy256_z65_ctrate_v2.yaml"),
     )
     parser.add_argument("--mock",action="store_true",help="Run one CPU latent sanity step without Wan weights")
     parser.add_argument("--checkpoint-dir",type=Path); parser.add_argument("--max-steps",type=int)

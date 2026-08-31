@@ -21,7 +21,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config", type=Path,
-        default=Path("configs/experiments/main5task_feedforward_h200x8.yaml"),
+        default=Path("configs/experiments/main5task_feedforward_lora_all_xy256_z65_ctrate_v2.yaml"),
     )
     parser.add_argument("--checkpoint-dir", type=Path, required=True)
     parser.add_argument("--wan-repo", type=Path, required=True)

@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--config", type=Path,
-        default=Path("configs/experiments/main5task_feedforward_h200x8.yaml"),
+        default=Path("configs/experiments/main5task_feedforward_lora_all_xy256_z65_ctrate_v2.yaml"),
     )
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--checkpoint-dir", type=Path, required=True)
@@ -267,6 +267,7 @@ def main() -> None:
             row = {"case_id": case_id, "index": index, "task": task, "metrics": metrics,
                    "artifact": str(artifact), "sampling_steps": args.sampling_steps,
                    "seed": args.seed + index, "objective": objective,
+                   "prompt": str(sample["prompt"]),
                    "reconstruction_views": reconstruction_views,
                    "structure": sample.get("metadata", {}).get("structure"),
                    "class_id": sample.get("metadata", {}).get("class_id")}

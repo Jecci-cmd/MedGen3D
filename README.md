@@ -39,17 +39,11 @@ task input volume + task prompt
         target 3D volume
 ```
 
-The canonical full-parameter configuration is:
+The canonical released configuration freezes the pretrained Wan weights and
+adds LoRA adapters to every DiT linear layer:
 
 ```text
-configs/experiments/main5task_feedforward_h200x8.yaml
-```
-
-The all-layer LoRA configuration freezes the pretrained Wan weights and adds
-adapters to every DiT linear layer:
-
-```text
-configs/experiments/main5task_feedforward_lora_all_h200x8.yaml
+configs/experiments/main5task_feedforward_lora_all_xy256_z65_ctrate_v2.yaml
 ```
 
 LoRA checkpoints contain the adapters and MedGen3D conditioning modules only;
@@ -86,7 +80,7 @@ export PYTHONPATH="$PWD/src:$WAN_REPO:$PYTHONPATH"
 
 The five-task protocol uses AbdomenAtlas, BraTS 2021, and CT-RATE. Downloading
 these datasets requires accepting their respective licenses and access terms.
-Edit the paths in `configs/data/main5task.yaml` and the preparation config
+Edit the paths in `configs/data/main5task_xy256_z65.yaml` and the preparation config
 before running the scripts.
 
 Main preparation entry points are:
@@ -95,14 +89,12 @@ Main preparation entry points are:
 scripts/prepare_abdomenatlas.py
 scripts/prepare_reconstruction_multiview.py
 scripts/prepare_brats2021_main.py
-scripts/prepare_ctrate_main.py
+scripts/prepare_ctrate_v2.py
 ```
 
 ### Canonical CT-RATE V2 for full-volume generation
 
-The legacy CT-RATE preparation script only resized image indices and is kept
-for backward compatibility. For a full-volume generation experiment, prepare a
-new corpus with a fixed physical grid instead:
+For full-volume generation, prepare CT-RATE on a fixed physical grid:
 
 ```bash
 python scripts/prepare_ctrate_v2.py \
@@ -119,7 +111,7 @@ Train it with
 `configs/experiments/main5task_feedforward_lora_all_xy256_z65_ctrate_v2.yaml`.
 Generation still uses 65-slice windows for memory efficiency, but now receives
 normalized window position and extent; inference covers the complete z axis
-with overlap blending. Do not mix V1 and V2 volumes within an experiment.
+with overlap blending.
 
 The formal split sizes are:
 
@@ -135,17 +127,11 @@ seeds stored in the configuration files.
 
 ## Sanity checks
 
-Run the unit tests first:
-
-```bash
-python -m pytest -q
-```
-
 The CPU mock path checks the data-to-loss plumbing without loading Wan weights:
 
 ```bash
 python scripts/train_medgen3d.py \
-  --config configs/experiments/main5task_feedforward_lora_all_h200x8.yaml \
+  --config configs/experiments/main5task_feedforward_lora_all_xy256_z65_ctrate_v2.yaml \
   --mock
 ```
 
@@ -153,7 +139,7 @@ Before a formal run, validate the environment, configuration, and checkpoint:
 
 ```bash
 python scripts/preflight_training.py \
-  --config configs/experiments/main5task_feedforward_lora_all_h200x8.yaml \
+  --config configs/experiments/main5task_feedforward_lora_all_xy256_z65_ctrate_v2.yaml \
   --checkpoint-dir "$WAN_WEIGHTS" \
   --wan-repo "$WAN_REPO"
 ```
@@ -164,21 +150,12 @@ Launch the all-layer LoRA experiment on eight GPUs:
 
 ```bash
 torchrun --standalone --nproc_per_node=8 scripts/train_medgen3d.py \
-  --config configs/experiments/main5task_feedforward_lora_all_h200x8.yaml \
+  --config configs/experiments/main5task_feedforward_lora_all_xy256_z65_ctrate_v2.yaml \
   --checkpoint-dir "$WAN_WEIGHTS"
 ```
 
 Resume from a MedGen3D checkpoint with `--resume /path/to/checkpoint.pt`. Use
 `--export-portable /path/to/output.pt` to export a portable adapter checkpoint.
-
-`scripts/run_main5task_supervisor.sh` reproduces the original managed-cluster
-pipeline, but contains site-specific filesystem paths. Set `MEDGEN3D_CONFIG`
-to select the full-parameter or LoRA experiment and adapt the paths before use:
-
-```bash
-MEDGEN3D_CONFIG="$PWD/configs/experiments/main5task_feedforward_lora_all_h200x8.yaml" \
-  bash scripts/run_main5task_supervisor.sh
-```
 
 ## Evaluation
 
@@ -186,7 +163,7 @@ Evaluate a checkpoint on one or more tasks:
 
 ```bash
 python scripts/evaluate_medgen3d.py \
-  --config configs/experiments/main5task_feedforward_lora_all_h200x8.yaml \
+  --config configs/experiments/main5task_feedforward_lora_all_xy256_z65_ctrate_v2.yaml \
   --checkpoint /path/to/medgen3d-checkpoint.pt \
   --checkpoint-dir "$WAN_WEIGHTS" \
   --samples-per-task 200 \
@@ -197,12 +174,13 @@ python scripts/evaluate_medgen3d.py \
 Evaluation can be sharded with `--num-shards N --shard-index I`; merge completed
 shards using `scripts/merge_evaluation_shards.py`. Metrics configured for the
 five tasks include Dice/NSD/HD95/ASSD, MAE/RMSE/PSNR/SSIM, and volumetric
-generation metrics. Generation first writes NIfTI volumes; compute its
-dataset-level FID and FVD-CT separately using the frozen CT-CLIP checkpoint:
+generation metrics. Generation first writes canonical NIfTI volumes; compute
+its four dataset-level metrics separately using frozen I3D and CT-CLIP models:
 
 ```bash
 python scripts/evaluate_generation_metrics.py \
   --results outputs/evaluation/results.json \
+  --i3d-model /path/to/frozen_i3d_features.pt \
   --ctclip-repo /path/to/CT-CLIP \
   --ctclip-backbone /path/to/ctclip-backbone \
   --ctclip-weights /path/to/ctclip-weights.pt \
@@ -210,10 +188,12 @@ python scripts/evaluate_generation_metrics.py \
 ```
 
 FID uses five evenly spaced axial slices per volume and ImageNet-pretrained
-Inception-V3 features. FVD-CT is the Fréchet distance between frozen CT-CLIP
-3D vision features. For distributed feature extraction, pass
+Inception-V3 features; FVD uses frozen I3D video features; CT-CLIP T2I is the
+paired report-to-generated-volume cosine similarity; CT-CLIP I2I is the paired
+generated-to-reference-volume cosine similarity. The I3D model must be a
+TorchScript feature extractor accepting `[B,3,T,H,W]`. For distributed feature extraction, pass
 `--features-output` to each shard and merge them with
-`scripts/merge_generation_metric_shards.py`.
+`scripts/merge_generation_metrics.py`.
 
 ## Experiment protocol
 
@@ -231,10 +211,9 @@ Inception-V3 features. FVD-CT is the Fréchet distance between frozen CT-CLIP
 ```text
 configs/       data, model, training, and experiment configurations
 scripts/       preparation, auditing, training, and evaluation entry points
-src/medgen3d/  model, trainer, inference, metrics, prompts, and configuration
+src/medgen3d/  model, trainer, inference, metrics, and configuration
 src/medicalmodel_data/  volumetric data and degradation pipeline
-tests/         unit and integration tests
-analysis/      analysis utilities
+analysis/      optional frozen-cohort analysis utilities
 ```
 
 ## Reproducibility notes
@@ -244,5 +223,5 @@ analysis/      analysis utilities
 - Do not compare partial evaluation shards with complete baselines.
 - HU-based CT metrics require the same clipping and inverse-normalization
   convention for predictions and references.
-- The managed-cluster supervisors are reference scripts; portable commands are
-  shown above because the checked-in supervisor paths are environment-specific.
+- The repository deliberately excludes cluster-specific launch wrappers; use
+  the portable commands above on your scheduler of choice.
