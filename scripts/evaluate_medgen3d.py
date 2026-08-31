@@ -218,10 +218,9 @@ def main() -> None:
                 if task == "synthesis":
                     metrics = synthesis_metrics(pred_metric, target_metric, data_range=1.0)
                 else:
-                    raise NotImplementedError(
-                        "Generation evaluation requires the paper's FID/FVD-CT feature "
-                        "extractors and preprocessing protocol, which are not bundled here."
-                    )
+                    # FID/FVD-CT are dataset-level distribution metrics. They are
+                    # computed from the saved volumes by evaluate_generation_metrics.py.
+                    metrics = {}
                 save_triplanar_ct(condition_np, pred, target, artifact)
 
             row = {"case_id": case_id, "index": index, "task": task, "metrics": metrics,
@@ -230,6 +229,9 @@ def main() -> None:
                    "reconstruction_views": reconstruction_views,
                    "structure": sample.get("metadata", {}).get("structure"),
                    "class_id": sample.get("metadata", {}).get("class_id")}
+            if task == "generation":
+                row["volume"] = str(volume_path)
+                row["target_volume"] = str(sample["metadata"]["inverse_transform"]["target_path"])
             rows.append(row)
             print(json.dumps(row, sort_keys=True), flush=True)
             write_json_atomic(partial_path, {

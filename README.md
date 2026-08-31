@@ -174,7 +174,23 @@ python scripts/evaluate_medgen3d.py \
 Evaluation can be sharded with `--num-shards N --shard-index I`; merge completed
 shards using `scripts/merge_evaluation_shards.py`. Metrics configured for the
 five tasks include Dice/NSD/HD95/ASSD, MAE/RMSE/PSNR/SSIM, and volumetric
-generation metrics.
+generation metrics. Generation first writes NIfTI volumes; compute its
+dataset-level FID and FVD-CT separately using the frozen CT-CLIP checkpoint:
+
+```bash
+python scripts/evaluate_generation_metrics.py \
+  --results outputs/evaluation/results.json \
+  --ctclip-repo /path/to/CT-CLIP \
+  --ctclip-backbone /path/to/ctclip-backbone \
+  --ctclip-weights /path/to/ctclip-weights.pt \
+  --output outputs/evaluation/generation_metrics.json
+```
+
+FID uses five evenly spaced axial slices per volume and ImageNet-pretrained
+Inception-V3 features. FVD-CT is the Fréchet distance between frozen CT-CLIP
+3D vision features. For distributed feature extraction, pass
+`--features-output` to each shard and merge them with
+`scripts/merge_generation_metric_shards.py`.
 
 ## Experiment protocol
 
