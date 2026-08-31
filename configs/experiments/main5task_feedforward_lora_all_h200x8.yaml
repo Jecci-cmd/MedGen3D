@@ -13,5 +13,5 @@ evaluation:
   segmentation: [dice, nsd, hd95, assd]
   restoration: [mae_hu, rmse_hu, psnr_hu, ssim]
   reconstruction: [mae_hu, rmse_hu, psnr_hu, ssim]
-  synthesis: [mae, psnr, ssim, delta_z_consistency_error]
+  synthesis: [mae, psnr, ssim]
   generation: [fvd_ct_net, slice_fid, ct_clip, delta_z_consistency]

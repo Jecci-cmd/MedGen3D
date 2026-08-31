@@ -71,7 +71,12 @@ def main() -> None:
         for model, summary in summaries.items():
             stats = summary["overall"] if class_name == "Average" else summary["by_class"].get(class_name)
             output[f"{model}_num_cases"] = 0 if stats is None else stats["num_cases"]
-            output[f"{model}_zero_dice_cases"] = 0 if stats is None else stats["zero_dice_cases"]
+            output[f"{model}_empty_prediction_count"] = (
+                0 if stats is None else stats["empty_prediction_count"]
+            )
+            output[f"{model}_empty_prediction_rate"] = (
+                0.0 if stats is None else stats["empty_prediction_rate"]
+            )
             for metric in SEGMENTATION_METRIC_KEYS:
                 metric_stats = None if stats is None else stats["metrics"][metric]
                 output[f"{model}_{metric}_mean"] = None if metric_stats is None else metric_stats["mean"]

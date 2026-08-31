@@ -57,7 +57,12 @@ def summarize_segmentation_by_class(rows: list[dict[str, Any]]) -> dict[str, Any
             }
         return {
             "num_cases": len(selected),
-            "zero_dice_cases": int(sum(float(row["metrics"]["dice"]) == 0.0 for row in selected)),
+            "empty_prediction_count": int(sum(
+                bool(row["metrics"].get("empty_prediction", False)) for row in selected
+            )),
+            "empty_prediction_rate": float(np.mean([
+                bool(row["metrics"].get("empty_prediction", False)) for row in selected
+            ])),
             "metrics": metrics,
         }
 
@@ -77,13 +82,19 @@ def segmentation_metrics(pred: np.ndarray, target: np.ndarray, spacing_zyx: tupl
     dice = 1.0 if denom == 0 else 2.0 * np.logical_and(pred, target).sum() / denom
     if not pred.any() or not target.any():
         distance = 0.0 if not pred.any() and not target.any() else float("inf")
-        return {"dice": float(dice), "nsd": float(dice), "hd95_mm": distance, "assd_mm": distance}
+        return {
+            "dice": float(dice), "nsd": float(dice), "hd95_mm": distance,
+            "assd_mm": distance, "empty_prediction": not pred.any(),
+        }
     ps, ts = _surface(pred), _surface(target)
     d_to_t = distance_transform_edt(~ts, sampling=spacing_zyx)[ps]
     d_to_p = distance_transform_edt(~ps, sampling=spacing_zyx)[ts]
     distances = np.concatenate([d_to_t, d_to_p])
     nsd = ((d_to_t <= nsd_tolerance_mm).sum() + (d_to_p <= nsd_tolerance_mm).sum()) / (len(d_to_t) + len(d_to_p))
-    return {"dice": float(dice), "nsd": float(nsd), "hd95_mm": float(np.percentile(distances, 95)), "assd_mm": float(distances.mean())}
+    return {
+        "dice": float(dice), "nsd": float(nsd), "hd95_mm": float(np.percentile(distances, 95)),
+        "assd_mm": float(distances.mean()), "empty_prediction": False,
+    }
 
 
 def ct_metrics(pred_hu: np.ndarray, target_hu: np.ndarray, data_range_hu: float = 2000.0) -> dict[str, float]:
@@ -93,14 +104,6 @@ def ct_metrics(pred_hu: np.ndarray, target_hu: np.ndarray, data_range_hu: float 
     psnr = float("inf") if mse == 0 else 20 * math.log10(data_range_hu) - 10 * math.log10(mse)
     values = [structural_similarity(target[z], pred[z], data_range=data_range_hu) for z in range(target.shape[0])]
     return {"mae_hu": float(np.mean(np.abs(error))), "rmse_hu": rmse, "psnr_hu": psnr, "ssim": float(np.mean(values))}
-
-
-def delta_z_consistency_error(pred: np.ndarray, target: np.ndarray) -> float:
-    """MAE between prediction and target first-order changes along physical Z."""
-    if pred.shape != target.shape or pred.ndim != 3:
-        raise ValueError("delta-z expects aligned 3D volumes")
-    return float(np.mean(np.abs(np.diff(pred.astype(np.float64), axis=0) -
-                                np.diff(target.astype(np.float64), axis=0))))
 
 
 def synthesis_metrics(pred: np.ndarray, target: np.ndarray, data_range: float = 1.0) -> dict[str, float]:
@@ -114,7 +117,6 @@ def synthesis_metrics(pred: np.ndarray, target: np.ndarray, data_range: float = 
         "mae": float(np.mean(np.abs(error))),
         "psnr": float("inf") if mse == 0 else 20 * math.log10(data_range) - 10 * math.log10(mse),
         "ssim": float(np.mean(slice_ssim)),
-        "delta_z_consistency_error": delta_z_consistency_error(pred, target),
     }
 
 

@@ -16,7 +16,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from medgen3d.config import load_experiment_config
 from medgen3d.data import TASKS, build_task_dataset
 from medgen3d.evaluation import (
-    delta_z_consistency_error,
     paired_ct_metrics,
     save_segmentation_overlay,
     save_triplanar_ct,
@@ -219,11 +218,10 @@ def main() -> None:
                 if task == "synthesis":
                     metrics = synthesis_metrics(pred_metric, target_metric, data_range=1.0)
                 else:
-                    metrics = {
-                        "delta_z_consistency_error": delta_z_consistency_error(
-                            pred_metric, target_metric
-                        )
-                    }
+                    raise NotImplementedError(
+                        "Generation evaluation requires the paper's FID/FVD-CT feature "
+                        "extractors and preprocessing protocol, which are not bundled here."
+                    )
                 save_triplanar_ct(condition_np, pred, target, artifact)
 
             row = {"case_id": case_id, "index": index, "task": task, "metrics": metrics,
