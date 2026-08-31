@@ -1,0 +1,13 @@
+train:
+  finetuning:
+    mode: lora_all_linear
+    rank: 16
+    alpha: 32
+    dropout: 0.05
+  optimizer:
+    # LoRA can use a higher LR than full DiT fine-tuning. MedGen3D's newly
+    # initialized condition modules retain their dedicated LR group.
+    zero_redundancy: false
+    learning_rate: 1.0e-4
+    new_module_learning_rate: 1.0e-4
+    new_module_patterns: [condition_patch_embedding, view_embedding]

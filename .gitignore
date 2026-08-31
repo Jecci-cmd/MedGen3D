@@ -1,0 +1,25 @@
+# Local secrets and environments
+.private/
+.venv/
+.env
+.env.*
+
+# Downloaded datasets and generated artifacts
+/data/
+/outputs/
+/logs/
+/refine-logs/
+
+# Python caches and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store

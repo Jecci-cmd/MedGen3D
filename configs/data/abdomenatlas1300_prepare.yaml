@@ -1,0 +1,25 @@
+dataset:
+  name: AbdomenAtlas1.0Mini
+  source_repository: AbdomenAtlas/AbdomenAtlas1.0Mini
+  source_revision: 4dff62f03f7e4f17cd8c62617bc75fde9893a1e9
+  label_reset_header_policy: {enabled: true, version: abdomenatlas-mini-reset-lps-v1, expected_axis_signs_xyz: [-1, -1, 1]}
+  root: /inspire/ssd/project/video-generation/public/lijiaxi/medicalmodel/data/AbdomenAtlas1.0Mini
+  expected_cases: 1300
+  archives: {}
+  class_map: {0: background, 1: aorta, 2: gall_bladder, 3: kidney_left, 4: kidney_right, 5: liver, 6: pancreas, 7: postcava, 8: spleen, 9: stomach}
+split:
+  seed: 20260825
+  full_counts: {train: 1000, val: 100, test: 200}
+canonical: {orientation: RAS, target_spacing_xyz_mm: [1.5, 1.5, 1.5], ct_dtype: int16, label_dtype: uint8}
+tasks:
+  segmentation: {sdf_classes: [1, 2, 3, 4, 5, 6, 7, 8, 9], sdf_clip_mm: 8.0, sdf_positive_inside: true}
+  restoration: {geometry: parallel, views: 720, incident_photons: 10000, mu_water_per_mm: 0.02, electronic_noise_std: 0.0}
+  reconstruction: {geometry: parallel, views: 18, mu_water_per_mm: 0.02}
+processed:
+  hu_clip: [-1000.0, 1000.0]
+  output_range: [-1.0, 1.0]
+  patch_shape_zyx: [97, 96, 96]
+  train_patches_per_case: 1
+  foreground_probability: 0.7
+  seed: 20260825
+runtime: {projection_workers: 8}

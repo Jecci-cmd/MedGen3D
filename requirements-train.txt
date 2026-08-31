@@ -1,0 +1,8 @@
+-r requirements-data.txt
+torch>=2.4
+transformers>=4.49,<=4.51.3
+huggingface-hub>=0.25
+diffusers>=0.31
+einops>=0.8
+safetensors>=0.4
+matplotlib>=3.8

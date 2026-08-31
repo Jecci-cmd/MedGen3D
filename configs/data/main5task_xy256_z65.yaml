@@ -1,0 +1,51 @@
+data:
+  root: /inspire/ssd/project/video-generation/public/lijiaxi/medicalmodel/data/AbdomenAtlas1.0Mini
+  manifests: {train: processed/manifests_recon_severe_v1/train.jsonl, val: processed/manifests_recon_severe_v1/val.jsonl, test: processed/manifests_recon_severe_v1/test.jsonl}
+  splits: {train: splits/train.txt, val: splits/val.txt, test: splits/test.txt}
+  expected_split_counts: {train: 1000, val: 100, test: 200}
+  target_spacing_xyz_mm: [1.5, 1.5, 1.5]
+  hu_clip: [-1000.0, 1000.0]
+  ct_normalization: {name: linear_clip, input: HU, output_range: [-1.0, 1.0], version: ct-linear-v1}
+  sdf: {clip_distance_mm: 8.0, positive_inside: false, foreground_rule: "sdf < 0", normalized_range: [-1.0, 1.0], version: sdf-negative-inside-clip8-v3}
+  # Preserve the complete in-plane field of view, resize each axial slice,
+  # then cycle deterministically through overlapping 65-slice z windows.
+  patch_size_dhw: [65, 256, 256]
+  resize_xy: [256, 256]
+  sliding_window: {axis: z, depth: 65, stride: 32, include_flush_final_window: true}
+  segmentation_target: sdf
+  foreground_probability: 0.7
+  segmentation_foreground_probability: 0.50
+  segmentation_surface_probability: 0.50
+  segmentation_foreground_warmup_probability: 0.65
+  segmentation_surface_warmup_probability: 0.35
+  segmentation_foreground_warmup_fraction: 0.70
+  segmentation_center_jitter_zyx: [12, 12, 12]
+  segmentation_surface_center_jitter_zyx: [2, 2, 2]
+  segmentation_surface_band_mm: 2.0
+  segmentation_min_foreground_voxels: 100
+  segmentation_organ_sampling: balanced_round_robin
+  segmentation_case_sampling: shuffled_cycle
+  segmentation_zoom: {probability: 0.0, scale_zyx: {}}
+  spatial_flip_probability: 0.0
+  restoration: {incident_photons: 10000, dose_level: synthetic_i0_1e4, views: 720}
+  reconstruction:
+    views: 18
+    train_views: [18]
+    validation_views: [18]
+    test_views: [10, 18, 20]
+    full_views: 720
+    geometry: parallel_beam
+    residual_prediction: none
+  volume_tasks:
+    synthesis:
+      root: /inspire/qb-ilm/project/video-generation/public/lijiaxi/MedGen3D-main/data/brats2021_t1_t2_xy256
+      manifests: {train: manifests/train.jsonl, val: manifests/val.jsonl, test: manifests/test.jsonl}
+      expected_split_counts: {train: 1000, val: 50, test: 200}
+      spatial_flip_probability: 0.5
+    generation:
+      root: /inspire/qb-ilm/project/video-generation/public/lijiaxi/MedGen3D-main/data/ctrate_report_ct_xy256
+      manifests: {train: manifests/train.jsonl, val: manifests/val.jsonl, test: manifests/test.jsonl}
+      expected_split_counts: {train: 1000, val: 100, test: 200}
+      spatial_flip_probability: 0.0
+  sample_format_version: medgen3d-sample-v2-xy256-z65
+  prompt_template_version: medgen3d-prompts-v1

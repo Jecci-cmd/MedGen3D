@@ -1,0 +1,17 @@
+defaults:
+  - ../data/main5task.yaml
+  - ../model/wan22_ti2v_5b.yaml
+  - ../train/main5task_feed_forward.yaml
+  - ../train/main5task_feed_forward_lora_all.yaml
+
+experiment:
+  name: medgen3d_main5task_feedforward_l2_lora_all_h200x8
+  tasks: [segmentation, restoration, reconstruction, synthesis, generation]
+  task_sampling_ratio: {segmentation: 1.0, restoration: 1.0, reconstruction: 1.0, synthesis: 1.0, generation: 1.0}
+
+evaluation:
+  segmentation: [dice, nsd, hd95, assd]
+  restoration: [mae_hu, rmse_hu, psnr_hu, ssim]
+  reconstruction: [mae_hu, rmse_hu, psnr_hu, ssim]
+  synthesis: [mae, psnr, ssim, delta_z_consistency_error]
+  generation: [fvd_ct_net, slice_fid, ct_clip, delta_z_consistency]

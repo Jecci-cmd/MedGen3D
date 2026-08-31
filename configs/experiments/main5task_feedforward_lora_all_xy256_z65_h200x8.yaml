@@ -1,0 +1,20 @@
+defaults:
+  - ../data/main5task_xy256_z65.yaml
+  - ../model/wan22_ti2v_5b.yaml
+  - ../train/main5task_feed_forward_10k_best.yaml
+  - ../train/main5task_feed_forward_lora_all.yaml
+
+experiment:
+  name: medgen3d_main5task_lora_all_xy256_z65_h200x8
+  tasks: [segmentation, restoration, reconstruction, synthesis, generation]
+  task_sampling_ratio: {segmentation: 1.0, restoration: 1.0, reconstruction: 1.0, synthesis: 1.0, generation: 1.0}
+
+model:
+  probe_input_shape: [1, 1, 65, 256, 256]
+
+evaluation:
+  segmentation: [dice, nsd, hd95, assd]
+  restoration: [mae_hu, rmse_hu, psnr_hu, ssim]
+  reconstruction: [mae_hu, rmse_hu, psnr_hu, ssim]
+  synthesis: [mae, psnr, ssim]
+  generation: [fvd_ct_net, slice_fid, ct_clip]

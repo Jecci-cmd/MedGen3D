@@ -1,0 +1,35 @@
+model:
+  family: wan2.2-ti2v
+  model_id: Wan-AI/Wan2.2-TI2V-5B
+  model_revision: 921dbaf3f1674a56f47e83fb80a34bac8a8f203e
+  wan_repo_commit: 42bf4cfaa384bc21833865abc2f9e6c0e67233dc
+  checkpoint: Wan2.2-TI2V-5B
+  vae_checkpoint: Wan2.2_VAE.pth
+  vae_version: wan2.2_vae_48ch
+  text_encoder: UMT5-XXL
+  conditioning_mode: full_volume
+  normalized_flow_time: true
+  pretrained_timestep_scale: 1000.0
+  latent_channels: 48
+  vae_stride_dhw: [4, 16, 16]
+  dit_patch_size_dhw: [1, 2, 2]
+  hidden_dim: 3072
+  ffn_dim: 14336
+  attention_heads: 24
+  transformer_layers: 30
+  freeze_vae: true
+  freeze_text_encoder: true
+  train_dit: true
+  condition_embedding_init: zeros
+  view_conditioning: fourier_mlp_adaln
+  view_fourier_bands: 8
+  gradient_checkpointing: true
+  prompt_templates:
+    segmentation: "Segment the {structure} in this CT volume."
+    restoration: "Restore this low-dose CT volume."
+    reconstruction: "Reconstruct this sparse-view CT volume."
+    empty: ""
+  cache_dir: checkpoints/wan22_ti2v_5b
+  prompt_cache_dir: cache/text_embeddings/medgen3d-prompts-v1
+  probe_input_shape: [1, 1, 97, 96, 96]
+  observed_latent_shape: null

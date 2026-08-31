@@ -1,0 +1,34 @@
+train:
+  objective: feed_forward_latent_regression
+  fixed_timestep: 0.0
+  loss: masked_latent_mse
+  batch_size: 1
+  gradient_accumulation_steps: 1
+  precision: bf16
+  optimizer:
+    name: adamw
+    zero_redundancy: true
+    learning_rate: 1.0e-5
+    new_module_learning_rate: 1.0e-4
+    new_module_patterns: [condition_patch_embedding, view_embedding]
+    weight_decay: 0.01
+    betas: [0.9, 0.999]
+    eps: 1.0e-8
+  scheduler: {name: cosine, warmup_steps: 2000}
+  max_steps: 100000
+  max_grad_norm: 1.0
+  validation_every_steps: 2000
+  validation_samples: {segmentation: 100, restoration: 100, reconstruction: 100, synthesis: 50, generation: 100}
+  # Periodic checkpoints are fully resumable. best_model.pt is updated at
+  # validation boundaries whenever equal-weight mean validation loss improves.
+  model_checkpoint_every_steps: 0
+  full_checkpoint_every_steps: 10000
+  keep_last_checkpoints: 0
+  seed: 20260831
+  task_sampling_ratio: {segmentation: 1.0, restoration: 1.0, reconstruction: 1.0, synthesis: 1.0, generation: 1.0}
+  text_cfg_dropout: 0.0
+  drop_volume_condition: false
+  use_padding_loss_mask: true
+  output_dir: /inspire/qb-ilm/project/video-generation/public/lijiaxi/MedGen3D-main/outputs
+  log_every_steps: 10
+  require_clean_git: true
