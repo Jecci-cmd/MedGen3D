@@ -2,6 +2,7 @@
 torch>=2.4
 torchvision>=0.19
 transformers>=4.49,<=4.51.3
+torchmetrics[image]>=1.4
 huggingface-hub>=0.25
 diffusers>=0.31
 einops>=0.8

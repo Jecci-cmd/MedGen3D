@@ -175,25 +175,29 @@ Evaluation can be sharded with `--num-shards N --shard-index I`; merge completed
 shards using `scripts/merge_evaluation_shards.py`. Metrics configured for the
 five tasks include Dice/NSD/HD95/ASSD, MAE/RMSE/PSNR/SSIM, and volumetric
 generation metrics. Generation first writes canonical NIfTI volumes; compute
-its four dataset-level metrics separately using frozen I3D and CT-CLIP models:
+its three dataset-level metrics separately using the StyleGAN-V detectors and
+TorchMetrics CLIPScore:
+
+Generation's dataset-level metrics use the GenerateCT-referenced public
+implementations: StyleGAN-V's TensorFlow-compatible Inception detector for
+FID, StyleGAN-V's official FVD I3D detector for FVD-16, and TorchMetrics'
+CLIPScore for report--image alignment.  Place the downloaded
+`inception-2015-12-05.pkl` and `i3d_torchscript.pt` detector files on the
+evaluation machine, then run:
 
 ```bash
-python scripts/evaluate_generation_metrics.py \
+python scripts/generation/evaluate_generation_metrics.py \
   --results outputs/evaluation/results.json \
-  --i3d-model /path/to/frozen_i3d_features.pt \
-  --ctclip-repo /path/to/CT-CLIP \
-  --ctclip-backbone /path/to/ctclip-backbone \
-  --ctclip-weights /path/to/ctclip-weights.pt \
+  --fid-detector /path/to/inception-2015-12-05.pkl \
+  --i3d-model /path/to/i3d_torchscript.pt \
   --output outputs/evaluation/generation_metrics.json
 ```
 
-FID uses five evenly spaced axial slices per volume and ImageNet-pretrained
-Inception-V3 features; FVD uses frozen I3D video features; CT-CLIP T2I is the
-paired report-to-generated-volume cosine similarity; CT-CLIP I2I is the paired
-generated-to-reference-volume cosine similarity. The I3D model must be a
-TorchScript feature extractor accepting `[B,3,T,H,W]`. For distributed feature extraction, pass
-`--features-output` to each shard and merge them with
-`scripts/merge_generation_metrics.py`.
+CT volumes are clipped to `[-1000, 1000]` HU and converted to uint8 RGB axial
+frames. FID uses all axial frames; FVD uses 16 uniformly sampled axial frames;
+and `CLIPScore` is the mean TorchMetrics text--image score over axial frames.
+The former two CT-CLIP columns are intentionally superseded by the one
+`CLIPScore` field.
 
 ## Experiment protocol
 
