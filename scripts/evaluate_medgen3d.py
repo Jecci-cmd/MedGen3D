@@ -181,9 +181,15 @@ def main() -> None:
     spacing_zyx = tuple(float(x) for x in reversed(data["target_spacing_xyz_mm"]))
 
     for task in args.tasks:
+        # Dataset-level volume metrics require a prediction over exactly the
+        # same complete volume as the target.  A single synthesis patch cannot
+        # be resized to an entire subject without invalidating MAE/PSNR/SSIM.
+        full_volume = task == "generation" or (
+            task == "synthesis" and objective == "feed_forward_latent_regression"
+        )
         dataset = build_task_dataset(
             data, task, "test", seed=args.seed,
-            num_samples=args.samples_per_task, training=False, whole_volume=task == "generation",
+            num_samples=args.samples_per_task, training=False, whole_volume=full_volume,
         )
         for index in range(args.shard_index, args.samples_per_task, args.num_shards):
             if (task, index) in completed:
@@ -194,12 +200,15 @@ def main() -> None:
             reconstruction_views = sample.get("metadata", {}).get("reconstruction_views")
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 if objective == "feed_forward_latent_regression":
-                    if task == "generation":
+                    if task in {"generation", "synthesis"}:
                         prediction = predict_feed_forward_sliding_volume(
                             condition, sample["prompt"], vae, text_encoder, model,
                             window_depth=int(data["patch_size_dhw"][0]),
                             stride=int(data.get("sliding_window", {}).get("stride", data["patch_size_dhw"][0])),
                             fixed_timestep=float(train.get("fixed_timestep", 0.0)),
+                            # Position conditioning is part of CT generation,
+                            # but synthesis was trained without it.
+                            use_position=task == "generation",
                         )
                     else:
                         position = torch.tensor([[
@@ -246,6 +255,11 @@ def main() -> None:
             else:
                 volume_path = output_dir / "volumes" / task / f"{case_id}.nii.gz"
                 if task == "synthesis":
+                    if pred.shape != target.shape:
+                        raise RuntimeError(
+                            "Synthesis evaluation requires a full-volume prediction aligned "
+                            f"with the target, got prediction {pred.shape} and target {target.shape}"
+                        )
                     pred_metric, target_metric = save_original_grid_volume(
                         pred, sample["metadata"], task, volume_path
                     )

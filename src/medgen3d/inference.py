@@ -72,8 +72,15 @@ def predict_feed_forward_volume(
 def predict_feed_forward_sliding_volume(
     condition: torch.Tensor, prompt: str, vae: Any, text_encoder: Any, model: Any,
     window_depth: int, stride: int, fixed_timestep: float = 0.0,
+    use_position: bool = True,
 ) -> torch.Tensor:
-    """Predict a complete volume through overlapping, position-conditioned z windows."""
+    """Predict a complete volume through overlapping z windows.
+
+    ``use_position`` must match the task's training contract.  Report-to-CT
+    generation is trained with z-position conditioning; MRI synthesis is not,
+    so supplying per-window positions for synthesis would introduce an
+    inference-only conditioning signal.
+    """
     if condition.ndim != 5 or condition.shape[0] != 1:
         raise ValueError("Expected one full volume shaped [1,C,D,H,W]")
     if window_depth <= 0 or stride <= 0:
@@ -90,10 +97,12 @@ def predict_feed_forward_sliding_volume(
         available = patch.shape[-3]
         if available < window_depth:
             patch = torch.nn.functional.pad(patch, (0, 0, 0, 0, 0, window_depth - available), value=-1.0)
-        position = torch.tensor(
-            [[start / max(depth - window_depth, 1), min(window_depth, depth) / max(depth, 1)]],
-            device=condition.device, dtype=torch.float32,
-        )
+        position = None
+        if use_position:
+            position = torch.tensor(
+                [[start / max(depth - window_depth, 1), min(window_depth, depth) / max(depth, 1)]],
+                device=condition.device, dtype=torch.float32,
+            )
         prediction, _ = predict_feed_forward_volume(
             patch, prompt, vae, text_encoder, model, fixed_timestep=fixed_timestep,
             volume_position=position,
