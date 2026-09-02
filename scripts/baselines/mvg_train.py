@@ -256,6 +256,10 @@ def main() -> None:
             row = {"epoch": epoch, "loss": average, "seconds": time.time() - start, "world_size": world}
             with log_path.open("a") as handle: handle.write(json.dumps(row) + "\n")
             print(json.dumps(row), flush=True)
+            # The resumable state is overwritten every epoch, so an available
+            # multi-GPU instance can take over without waiting for a sparse
+            # milestone. Evaluation snapshots remain spaced out and compact.
+            torch.save({"model": raw_model.state_dict(), "optimizer": optimizer.state_dict(), "epoch": epoch, "args": vars(args)}, args.output_dir / "checkpoint-latest.pt")
             if epoch % args.save_every == 0 or epoch + 1 == args.epochs:
                 # Snapshots used for evaluation do not need Adam moments. Keep
                 # exactly one resumable optimizer checkpoint plus compact
@@ -263,7 +267,6 @@ def main() -> None:
                 # states over a long baseline run.
                 torch.save({"model": raw_model.state_dict(), "epoch": epoch, "args": vars(args)},
                            args.output_dir / f"model-{epoch:03d}.pt")
-                torch.save({"model": raw_model.state_dict(), "optimizer": optimizer.state_dict(), "epoch": epoch, "args": vars(args)}, args.output_dir / "checkpoint-latest.pt")
     if world > 1:
         dist.destroy_process_group()
 
