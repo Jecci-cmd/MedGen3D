@@ -135,8 +135,11 @@ class MVGMedGenDataset(Dataset[dict[str, torch.Tensor]]):
 
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
         rng = self._rng(index)
-        choices = (self.seg, self.restore, self.synth)
-        item = choices[index % 3][rng.randrange(len(choices[index % 3]))]
+        # The released all-task MVG dataset constructs
+        # ``seg * 2 + inpaint + trans``.  Preserve that 2:1:1 exposure ratio
+        # when mapping its three task families to our benchmark counterparts.
+        choices = (self.seg, self.seg, self.restore, self.synth)
+        item = choices[index % 4][rng.randrange(len(choices[index % 4]))]
         source_path, target_path, mode, label_id = self._paths(item)
         source, target = self.cache.load(source_path), self.cache.load(target_path)
         depth = min(source.shape[0], target.shape[0])
