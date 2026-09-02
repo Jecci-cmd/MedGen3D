@@ -69,7 +69,11 @@ def decode(tensor: torch.Tensor, mode: str, shape: tuple[int, int]) -> np.ndarra
     if mode == "ct":
         return np.clip(x, 0, 1) * 2000.0 - 1000.0
     if mode == "mri":
-        return np.clip(x, 0, 1)
+        # ``encode(..., "mri")`` maps the manifest's [-1, 1] MRI range to
+        # [0, 1] before ImageNet normalization.  Return to that original
+        # manifest range here; the synthesis metric below then converts both
+        # prediction and target to [0, 1] exactly once.
+        return np.clip(x, 0, 1) * 2.0 - 1.0
     return x
 
 
