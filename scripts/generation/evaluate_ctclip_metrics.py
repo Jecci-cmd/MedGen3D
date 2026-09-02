@@ -34,8 +34,10 @@ from transformers import BertConfig, BertModel
 
 
 PROTOCOL = "ctrate_v2_ctclip_fvd_t2i_i2i_v1"
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CTCLIP_ASSETS = REPOSITORY_ROOT / "evaluation_assets" / "ctclip"
+DEFAULT_CTCLIP_ASSETS = Path(
+    "/inspire/qb-ilm/project/video-generation/public/lijiaxi/MedGen3D-main/"
+    "evaluation_assets/ctclip"
+)
 DEFAULT_CTCLIP_ROOT = DEFAULT_CTCLIP_ASSETS / "CT-CLIP"
 # Shared evaluation asset; do not fall back to an arbitrary local CLIP weight.
 DEFAULT_CTCLIP_CHECKPOINT = Path(
