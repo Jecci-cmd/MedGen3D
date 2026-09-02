@@ -87,9 +87,9 @@ Main preparation entry points are:
 
 ```text
 scripts/prepare_abdomenatlas.py
-scripts/prepare_reconstruction_multiview.py
-scripts/prepare_brats2021_main.py
-scripts/prepare_ctrate_v2.py
+scripts/reconstruction/prepare_reconstruction_multiview.py
+scripts/synthesis/prepare_brats2021_main.py
+scripts/generation/prepare_ctrate_v2.py
 ```
 
 ### Canonical CT-RATE V2 for full-volume generation
@@ -175,11 +175,35 @@ Evaluation can be sharded with `--num-shards N --shard-index I`; merge completed
 shards using `scripts/merge_evaluation_shards.py`. Metrics configured for the
 five tasks include Dice/NSD/HD95/ASSD, MAE/RMSE/PSNR/SSIM, and volumetric
 generation metrics. Generation first writes canonical NIfTI volumes.  The
-generation protocol uses CT-CLIP whole-volume embeddings: FVD-CT (Fréchet
-distance between real and generated CT embeddings), report-to-image CT-CLIP
-(T2I), and real-to-generated CT-CLIP (I2I).  Place the CT-CLIP checkout and
-the published `CT-CLIP_v2.pt` once under `evaluation_assets/ctclip/` (or
-override the two optional paths), then provide the CT-RATE metadata CSV:
+frozen generation protocol is four complementary metrics: MAISI 2.5D FID
+(RadImageNet features; lower is better), CT-CLIP FVD (whole-volume embedding
+Fréchet distance; lower is better), CT-CLIP T2I (report-to-generated-volume;
+higher is better), and CT-CLIP I2I (generated-to-reference-volume; higher is
+better).
+
+The evaluation assets are local-only and are never downloaded by an evaluator.
+Set `MEDGEN3D_EVAL_ASSETS` once to a directory with this layout:
+
+```text
+evaluation_assets/
+├── maisi/radimagenet-models/
+│   └── weights/RadImageNet-ResNet50_notop.pth
+└── ctclip/
+    ├── CT-CLIP/
+    ├── CT-CLIP_v2.pt
+    └── BiomedVLP-CXR-BERT-specialized/
+```
+
+Compute MAISI FID with the official MAISI preprocessing protocol:
+
+```bash
+torchrun --standalone --nproc_per_node=4 \
+  scripts/generation/evaluate_maisi_fid_2p5d.py \
+  --results outputs/evaluation/results.json \
+  --output outputs/evaluation/maisi_fid.json
+```
+
+Then compute the CT-CLIP metrics with the CT-RATE metadata CSV:
 
 ```bash
 python scripts/generation/evaluate_ctclip_metrics.py \
@@ -188,9 +212,11 @@ python scripts/generation/evaluate_ctclip_metrics.py \
   --output outputs/evaluation/ctclip_metrics.json
 ```
 
-Each volume is resampled to CT-CLIP's physical grid `(1.5, 0.75, 0.75)`,
-centre-cropped/padded to `480 x 480 x 240`, and clipped to `[-1000, 1000]` HU.
-The evaluator records FVD-CT, T2I, I2I, and their clamped T2I/I2I mean.
+MAISI FID uses RAS orientation, 1-mm resampling, `512 x 512 x 512` centre
+crop/pad, the central 40% of XY/YZ/ZX slices, and a RadImageNet ResNet-50.
+CT-CLIP uses its physical grid `(1.5, 0.75, 0.75)`, centre-cropped/padded to
+`480 x 480 x 240`, and `[-1000, 1000]` HU clipping.  Do not compare numbers
+from the removed StyleGAN-V/I3D/torchmetrics protocol with these values.
 
 ## Experiment protocol
 

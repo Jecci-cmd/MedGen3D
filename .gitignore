@@ -9,6 +9,7 @@
 /outputs/
 /logs/
 /refine-logs/
+/evaluation_assets/
 
 # Python caches and test artifacts
 __pycache__/

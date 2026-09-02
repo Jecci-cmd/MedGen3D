@@ -266,7 +266,8 @@ def main() -> None:
                     metrics = synthesis_metrics(pred_metric, target_metric, data_range=1.0)
                 else:
                     # FID/FVD-CT are dataset-level distribution metrics. They are
-                    # computed from the saved volumes by evaluate_generation_metrics.py.
+                    # computed from the saved volumes by the dedicated MAISI
+                    # FID and CT-CLIP generation evaluators.
                     inverse = sample["metadata"]["inverse_transform"]
                     if "canonical_shape_xyz" in inverse:
                         save_canonical_generation_volume(pred, sample["metadata"], volume_path)

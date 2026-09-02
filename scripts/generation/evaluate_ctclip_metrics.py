@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -34,20 +35,16 @@ from transformers import BertConfig, BertModel, BertTokenizer
 
 
 PROTOCOL = "ctrate_v2_ctclip_fvd_t2i_i2i_v1"
-DEFAULT_CTCLIP_ASSETS = Path(
-    "/inspire/qb-ilm/project/video-generation/public/lijiaxi/MedGen3D-main/"
-    "evaluation_assets/ctclip"
-)
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+# Evaluation weights are intentionally local-only (and gitignored).  A shared
+# filesystem can override this location with MEDGEN3D_EVAL_ASSETS, but the
+# evaluator never falls back to a network download.
+DEFAULT_EVAL_ASSETS = Path(os.environ.get("MEDGEN3D_EVAL_ASSETS", REPOSITORY_ROOT / "evaluation_assets"))
+DEFAULT_CTCLIP_ASSETS = DEFAULT_EVAL_ASSETS / "ctclip"
 DEFAULT_CTCLIP_ROOT = DEFAULT_CTCLIP_ASSETS / "CT-CLIP"
 # Shared evaluation asset; do not fall back to an arbitrary local CLIP weight.
-DEFAULT_CTCLIP_CHECKPOINT = Path(
-    "/inspire/qb-ilm/project/video-generation/public/lijiaxi/MedGen3D-main/"
-    "evaluation_assets/ctclip/CT-CLIP_v2.pt"
-)
-DEFAULT_CXR_BERT = Path(
-    "/inspire/qb-ilm/project/video-generation/public/lijiaxi/MedGen3D-main/"
-    "evaluation_assets/ctclip/BiomedVLP-CXR-BERT-specialized"
-)
+DEFAULT_CTCLIP_CHECKPOINT = DEFAULT_CTCLIP_ASSETS / "CT-CLIP_v2.pt"
+DEFAULT_CXR_BERT = DEFAULT_CTCLIP_ASSETS / "BiomedVLP-CXR-BERT-specialized"
 
 
 def parse_args() -> argparse.Namespace:
