@@ -177,15 +177,14 @@ five tasks include Dice/NSD/HD95/ASSD, MAE/RMSE/PSNR/SSIM, and volumetric
 generation metrics. Generation first writes canonical NIfTI volumes.  The
 generation protocol uses CT-CLIP whole-volume embeddings: FVD-CT (Fréchet
 distance between real and generated CT embeddings), report-to-image CT-CLIP
-(T2I), and real-to-generated CT-CLIP (I2I).  Clone CT-CLIP and provide its
-published checkpoint and the CT-RATE metadata CSV, then run:
+(T2I), and real-to-generated CT-CLIP (I2I).  Place the CT-CLIP checkout and
+the published `CT-CLIP_v2.pt` once under `evaluation_assets/ctclip/` (or
+override the two optional paths), then provide the CT-RATE metadata CSV:
 
 ```bash
 python scripts/generation/evaluate_ctclip_metrics.py \
   --results outputs/evaluation/results.json \
   --metadata-csv /path/to/ct_rate_validation_metadata.csv \
-  --ctclip-root /path/to/CT-CLIP \
-  --ctclip-checkpoint /path/to/CT-CLIP_v2.pt \
   --output outputs/evaluation/ctclip_metrics.json
 ```
 

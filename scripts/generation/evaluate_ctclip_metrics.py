@@ -34,6 +34,10 @@ from transformers import BertModel
 
 
 PROTOCOL = "ctrate_v2_ctclip_fvd_t2i_i2i_v1"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CTCLIP_ASSETS = REPOSITORY_ROOT / "evaluation_assets" / "ctclip"
+DEFAULT_CTCLIP_ROOT = DEFAULT_CTCLIP_ASSETS / "CT-CLIP"
+DEFAULT_CTCLIP_CHECKPOINT = DEFAULT_CTCLIP_ASSETS / "CT-CLIP_v2.pt"
 
 
 def parse_args() -> argparse.Namespace:
@@ -42,10 +46,10 @@ def parse_args() -> argparse.Namespace:
                         help="Generation results.json from evaluate_medgen3d.py")
     parser.add_argument("--metadata-csv", type=Path, required=True,
                         help="CT-RATE metadata CSV containing spacing and rescale fields")
-    parser.add_argument("--ctclip-root", type=Path, required=True,
-                        help="CT-CLIP checkout containing CT_CLIP/, transformer_maskgit/, and scripts/")
-    parser.add_argument("--ctclip-checkpoint", type=Path, required=True,
-                        help="CT-CLIP model checkpoint")
+    parser.add_argument("--ctclip-root", type=Path, default=DEFAULT_CTCLIP_ROOT,
+                        help="CT-CLIP checkout (default: repository evaluation_assets/ctclip/CT-CLIP)")
+    parser.add_argument("--ctclip-checkpoint", type=Path, default=DEFAULT_CTCLIP_CHECKPOINT,
+                        help="CT-CLIP model checkpoint (default: repository evaluation_assets/ctclip/CT-CLIP_v2.pt)")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--expected-samples", type=int, default=200)
     parser.add_argument("--device", default="cuda", help="Torch device (default: cuda)")
