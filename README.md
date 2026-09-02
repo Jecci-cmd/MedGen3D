@@ -176,8 +176,8 @@ shards using `scripts/merge_evaluation_shards.py`. Metrics configured for the
 five tasks include Dice/NSD/HD95/ASSD, MAE/RMSE/PSNR/SSIM, and volumetric
 generation metrics. Generation first writes canonical NIfTI volumes.  The
 frozen generation protocol is four complementary metrics: MAISI 2.5D FID
-(RadImageNet features; lower is better), CT-CLIP FVD (whole-volume embedding
-Fréchet distance; lower is better), CT-CLIP T2I (report-to-generated-volume;
+(RadImageNet features; lower is better), CT-CLIP Fréchet (whole-volume embedding
+distance; lower is better), CT-CLIP T2I (report-to-generated-volume;
 higher is better), and CT-CLIP I2I (generated-to-reference-volume; higher is
 better).
 
@@ -193,6 +193,12 @@ evaluation_assets/
     ├── CT-CLIP_v2.pt
     └── BiomedVLP-CXR-BERT-specialized/
 ```
+
+For external baseline predictions whose NIfTI grid differs from the reference
+CT, first create a strict `results.json` with
+`scripts/generation/build_generation_results.py`, then pass
+`--prediction-spacing header` to the CT-CLIP evaluator.  MedGen3D fused
+outputs use the reference physical grid and retain the default `target` mode.
 
 Compute MAISI FID with the official MAISI preprocessing protocol:
 
