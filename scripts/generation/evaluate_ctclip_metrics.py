@@ -42,6 +42,10 @@ DEFAULT_CTCLIP_CHECKPOINT = Path(
     "/inspire/qb-ilm/project/video-generation/public/lijiaxi/MedGen3D-main/"
     "evaluation_assets/ctclip/CT-CLIP_v2.pt"
 )
+DEFAULT_CXR_BERT = Path(
+    "/inspire/qb-ilm/project/video-generation/public/lijiaxi/MedGen3D-main/"
+    "evaluation_assets/ctclip/BiomedVLP-CXR-BERT-specialized"
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -144,7 +148,9 @@ def ctclip_tensor(path: Path, *, slope: float, intercept: float, z_spacing: floa
 
 
 def build_model(device: torch.device, checkpoint: Path, CTCLIP: type[Any], CTViT: Any) -> Any:
-    text_encoder = BertModel.from_pretrained("microsoft/BiomedVLP-CXR-BERT-specialized").to(device)
+    if not (DEFAULT_CXR_BERT / "config.json").is_file():
+        raise FileNotFoundError(f"Missing fixed BiomedVLP CXR-BERT asset: {DEFAULT_CXR_BERT}")
+    text_encoder = BertModel.from_pretrained(str(DEFAULT_CXR_BERT), local_files_only=True).to(device)
     image_encoder = CTViT(dim=512, codebook_size=8192, image_size=480, patch_size=20,
                           temporal_patch_size=10, spatial_depth=4, temporal_depth=4,
                           dim_head=32, heads=8).to(device)
