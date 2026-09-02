@@ -181,6 +181,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--accum-iter", type=int, default=4)
     p.add_argument("--num-workers", type=int, default=4)
     p.add_argument("--lr", type=float, default=1e-4)
+    p.add_argument("--min-lr", type=float, default=0.0)
+    p.add_argument("--warmup-epochs", type=int, default=5)
     p.add_argument("--weight-decay", type=float, default=0.05)
     p.add_argument("--seed", type=int, default=20260903)
     p.add_argument("--resume", type=Path)
@@ -204,6 +206,7 @@ def main() -> None:
     sys.path.insert(0, str(args.mvg_root))
     import models_mvg  # type: ignore
     import utils.lr_decay as lr_decay  # type: ignore
+    import utils.lr_sched as lr_sched  # type: ignore
 
     torch.manual_seed(args.seed + rank); np.random.seed(args.seed + rank)
     torch.backends.cudnn.benchmark = True
@@ -239,6 +242,9 @@ def main() -> None:
         sampler.set_epoch(epoch); dataset.set_epoch(epoch); model.train(); optimizer.zero_grad(set_to_none=True)
         losses: list[float] = []; start = time.time()
         for step, batch in enumerate(loader):
+            # Same warmup + half-cosine scheduler as released MVG.  ``epoch``
+            # is fractional so the LR changes smoothly per optimizer step.
+            lr_sched.adjust_learning_rate(optimizer, epoch + step / len(loader), args)
             image, label = batch["image"].to(device, non_blocking=True), batch["label"].to(device, non_blocking=True)
             mask, valid = batch["mask"].to(device, non_blocking=True), batch["valid"].to(device, non_blocking=True)
             with torch.autocast("cuda", dtype=torch.bfloat16):
@@ -253,7 +259,8 @@ def main() -> None:
         if world > 1:
             tensor = torch.tensor([average], device=device); dist.all_reduce(tensor); average = float(tensor.item() / world)
         if rank == 0:
-            row = {"epoch": epoch, "loss": average, "seconds": time.time() - start, "world_size": world}
+            row = {"epoch": epoch, "loss": average, "lr": optimizer.param_groups[-1]["lr"],
+                   "seconds": time.time() - start, "world_size": world}
             with log_path.open("a") as handle: handle.write(json.dumps(row) + "\n")
             print(json.dumps(row), flush=True)
             # The resumable state is overwritten every epoch, so an available
