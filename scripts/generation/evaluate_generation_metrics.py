@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate report-to-CT generation with StyleGAN-V FID/FVD and CLIPScore.
+"""Retired StyleGAN-V evaluator retained only for historical reproducibility.
 
 This evaluator deliberately follows the public protocol referenced by
 GenerateCT: StyleGAN-V's TensorFlow-compatible Inception detector for FID,
@@ -227,4 +227,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # New evaluations must use the medical-image protocol.  Keep the legacy
+    # functions above readable so prior JSON artifacts remain auditable.
+    from evaluate_maisi_fid_2p5d import main as maisi_main
+    maisi_main()

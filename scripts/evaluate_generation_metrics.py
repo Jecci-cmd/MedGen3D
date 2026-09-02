@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Backward-compatible entry point for generation metric evaluation.
+"""Entry point for the MONAI MAISI-compatible CT generation evaluator.
 
-The implementation lives in ``scripts/generation`` with the other
-generation-specific utilities.
+The previous StyleGAN-V FID/FVD/CLIPScore protocol was retired because its
+natural-video features are not comparable to 3-D CT-generation literature.
+``generation.evaluate_maisi_fid_2p5d`` implements the official MAISI 2.5-D
+RadImageNet FID protocol and is the only supported generation metric here.
 """
-from generation.evaluate_generation_metrics import main
+from generation.evaluate_maisi_fid_2p5d import main
 
 
 if __name__ == "__main__":
