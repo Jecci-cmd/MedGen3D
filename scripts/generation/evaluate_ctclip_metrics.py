@@ -30,7 +30,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from scipy.linalg import sqrtm
-from transformers import BertConfig, BertModel
+from transformers import BertConfig, BertModel, BertTokenizer
 
 
 PROTOCOL = "ctrate_v2_ctclip_fvd_t2i_i2i_v1"
@@ -160,8 +160,21 @@ def build_model(device: torch.device, checkpoint: Path, CTCLIP: type[Any], CTViT
     image_encoder = CTViT(dim=512, codebook_size=8192, image_size=480, patch_size=20,
                           temporal_patch_size=10, spatial_depth=4, temporal_depth=4,
                           dim_head=32, heads=8).to(device)
-    model = CTCLIP(image_encoder=image_encoder, text_encoder=text_encoder,
-                   dim_image=294_912, dim_text=768, dim_latent=512).to(device)
+    original_tokenizer_loader = BertTokenizer.from_pretrained
+
+    def local_tokenizer_loader(name_or_path: str | Path, *args: Any, **kwargs: Any) -> Any:
+        if str(name_or_path) == "microsoft/BiomedVLP-CXR-BERT-specialized":
+            return original_tokenizer_loader(str(DEFAULT_CXR_BERT), *args, local_files_only=True, **kwargs)
+        return original_tokenizer_loader(name_or_path, *args, **kwargs)
+
+    # The official CT-CLIP constructor hard-codes the repository identifier;
+    # redirect it to the fixed, verified local asset for offline evaluation.
+    BertTokenizer.from_pretrained = local_tokenizer_loader  # type: ignore[method-assign]
+    try:
+        model = CTCLIP(image_encoder=image_encoder, text_encoder=text_encoder,
+                       dim_image=294_912, dim_text=768, dim_latent=512).to(device)
+    finally:
+        BertTokenizer.from_pretrained = original_tokenizer_loader  # type: ignore[method-assign]
     model.load(str(checkpoint))
     return model.eval()
 
