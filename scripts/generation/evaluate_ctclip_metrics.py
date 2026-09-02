@@ -59,6 +59,9 @@ def parse_args() -> argparse.Namespace:
                         help="CT-CLIP model checkpoint (default: fixed shared evaluation asset)")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--expected-samples", type=int, default=200)
+    parser.add_argument("--prediction-spacing", choices=("target", "header"), default="target",
+                        help="Physical spacing for predictions. Use 'target' for MedGen3D's fused outputs "
+                             "and 'header' for baseline NIfTI predictions that retain their own grid.")
     parser.add_argument("--device", default="cuda", help="Torch device (default: cuda)")
     return parser.parse_args()
 
@@ -192,6 +195,16 @@ def clean_prompt(text: str) -> str:
     return str(text).replace('"', "").replace("'", "").replace("(", "").replace(")", "")
 
 
+def prediction_spacing(path: Path, target_z: float, target_xy: float, mode: str) -> tuple[float, float]:
+    """Return the documented target grid or the prediction NIfTI's native grid."""
+    if mode == "target":
+        return target_z, target_xy
+    zooms = nib.load(str(path)).header.get_zooms()
+    if len(zooms) < 3 or min(float(value) for value in zooms[:3]) <= 0:
+        raise ValueError(f"Invalid NIfTI spacing for prediction: {path}")
+    return float(zooms[2]), float(zooms[0])
+
+
 def main() -> None:
     args = parse_args()
     if args.device.startswith("cuda") and not torch.cuda.is_available():
@@ -217,14 +230,17 @@ def main() -> None:
         record = lookup_metadata(metadata, row)
         z_spacing = float(record["ZSpacing"])
         xy_spacing = parse_xy_spacing(record["XYSpacing"])
+        generated_z_spacing, generated_xy_spacing = prediction_spacing(
+            prediction, z_spacing, xy_spacing, args.prediction_spacing
+        )
         prompt = clean_prompt(str(row["prompt"]))
         tokens = model.tokenizer(prompt, return_tensors="pt", padding="max_length",
                                  truncation=True, max_length=512).to(device)
         real = ctclip_tensor(target, slope=float(record["RescaleSlope"]),
                              intercept=float(record["RescaleIntercept"]), z_spacing=z_spacing,
                              xy_spacing=xy_spacing, resize_array=resize_array).unsqueeze(0).to(device)
-        generated = ctclip_tensor(prediction, slope=1.0, intercept=0.0, z_spacing=z_spacing,
-                                  xy_spacing=xy_spacing, resize_array=resize_array).unsqueeze(0).to(device)
+        generated = ctclip_tensor(prediction, slope=1.0, intercept=0.0, z_spacing=generated_z_spacing,
+                                  xy_spacing=generated_xy_spacing, resize_array=resize_array).unsqueeze(0).to(device)
         with torch.inference_mode():
             text_latent, real_latent, _ = model(tokens, real, return_latents=True, device=device)
             _, generated_latent, _ = model(tokens, generated, return_latents=True, device=device)
@@ -248,7 +264,8 @@ def main() -> None:
                "ctclip_t2i_clamped": float(np.mean([detail["ctclip_t2i_clamped"] for detail in details])),
                "ctclip_i2i": float(np.mean([detail["ctclip_i2i"] for detail in details])),
                "ctclip_mean": float(np.mean([detail["ctclip_mean"] for detail in details]))}
-    result = {"protocol": PROTOCOL, "samples": len(details), "summary": summary, "rows": details}
+    result = {"protocol": PROTOCOL, "samples": len(details),
+              "prediction_spacing": args.prediction_spacing, "summary": summary, "rows": details}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(summary, indent=2), flush=True)
