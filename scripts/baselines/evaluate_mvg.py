@@ -120,13 +120,13 @@ def fixed_pair(row: dict[str, Any], root: Path, task: str) -> tuple[np.ndarray, 
     return source[z], target[z]
 
 
-def evaluate_segmentation(pred: Predictor, test: list[dict[str, Any]], train: list[dict[str, Any]], root: Path,
+def evaluate_segmentation(pred: Predictor, test: list[dict[str, Any]], train: list[dict[str, Any]], test_root: Path, train_root: Path,
                           tolerance: float) -> dict[str, Any]:
-    supports = {label: first_seg_support(train, root, label) for label in LABELS}
+    supports = {label: first_seg_support(train, train_root, label) for label in LABELS}
     rows = []
     for index, row in enumerate(test):
         label = int(row.get("target_label_id", (index % len(LABELS)) + 1))
-        source, target = load(resolve(root, row["image"])), load(resolve(root, row["mask"]))
+        source, target = load(resolve(test_root, row["image"])), load(resolve(test_root, row["mask"]))
         sx, sy = supports[label]
         raw = pred.predict(encode(sx, "ct"), encode(sy, "seg"), source, "ct", "seg")
         output = raw > 5.0
@@ -137,17 +137,17 @@ def evaluate_segmentation(pred: Predictor, test: list[dict[str, Any]], train: li
     return {"rows": rows, "summary": summarize_segmentation_by_class(rows)}
 
 
-def evaluate_paired(pred: Predictor, test: list[dict[str, Any]], train: list[dict[str, Any]], root: Path, task: str) -> dict[str, Any]:
-    support_x, support_y = fixed_pair(train[0], root, task)
+def evaluate_paired(pred: Predictor, test: list[dict[str, Any]], train: list[dict[str, Any]], test_root: Path, train_root: Path, task: str) -> dict[str, Any]:
+    support_x, support_y = fixed_pair(train[0], train_root, task)
     mode = "ct" if task == "restoration" else "mri"
     rows = []
     for index, row in enumerate(test):
         if task == "restoration":
-            source, target = load(resolve(root, row["ldct"][0])), load(resolve(root, row["image"]))
+            source, target = load(resolve(test_root, row["ldct"][0])), load(resolve(test_root, row["image"]))
             output = pred.predict(encode(support_x, mode), encode(support_y, mode), source, mode, mode)
             metric = paired_ct_metrics(source, output, target)
         else:
-            source, target = load(resolve(root, row["condition"])), load(resolve(root, row["target"]))
+            source, target = load(resolve(test_root, row["condition"])), load(resolve(test_root, row["target"]))
             output = pred.predict(encode(support_x, mode), encode(support_y, mode), source, mode, mode)
             metric = synthesis_metrics((output + 1.0) / 2.0, (target + 1.0) / 2.0)
         rows.append({"index": index, "case_id": row["case_id"], "metrics": metric})
@@ -161,8 +161,10 @@ def evaluate_paired(pred: Predictor, test: list[dict[str, Any]], train: list[dic
 def args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--mvg-root", type=Path, required=True); p.add_argument("--checkpoint", type=Path, required=True)
-    p.add_argument("--ct-root", type=Path, required=True); p.add_argument("--ct-test-manifest", type=Path, required=True); p.add_argument("--ct-train-manifest", type=Path, required=True)
-    p.add_argument("--synth-root", type=Path, required=True); p.add_argument("--synth-test-manifest", type=Path, required=True); p.add_argument("--synth-train-manifest", type=Path, required=True)
+    p.add_argument("--ct-root", type=Path, required=True, help="Root for the evaluated CT cohort."); p.add_argument("--ct-train-root", type=Path, help="Root for fixed ID support slices (default: --ct-root)")
+    p.add_argument("--ct-test-manifest", type=Path, required=True); p.add_argument("--ct-train-manifest", type=Path, required=True)
+    p.add_argument("--synth-root", type=Path, required=True, help="Root for the evaluated synthesis cohort."); p.add_argument("--synth-train-root", type=Path, help="Root for fixed ID support slices (default: --synth-root)")
+    p.add_argument("--synth-test-manifest", type=Path, required=True); p.add_argument("--synth-train-manifest", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True); p.add_argument("--tasks", nargs="+", default=["segmentation", "restoration", "synthesis"])
     p.add_argument("--max-cases", type=int, default=0, help="Optional smoke-test cap; zero evaluates every frozen case.")
     p.add_argument("--seg-nsd-tolerance-mm", type=float, default=3.0); p.add_argument("--batch-size", type=int, default=2); p.add_argument("--device", default="cuda")
@@ -173,12 +175,13 @@ def main() -> None:
     a = args(); model = Predictor(a)
     ct_test, ct_train = read_jsonl(a.ct_test_manifest), read_jsonl(a.ct_train_manifest)
     synth_test, synth_train = read_jsonl(a.synth_test_manifest), read_jsonl(a.synth_train_manifest)
+    ct_train_root, synth_train_root = a.ct_train_root or a.ct_root, a.synth_train_root or a.synth_root
     if a.max_cases:
         ct_test, synth_test = ct_test[:a.max_cases], synth_test[:a.max_cases]
     result: dict[str, Any] = {"checkpoint": str(a.checkpoint), "tasks": {}}
-    if "segmentation" in a.tasks: result["tasks"]["segmentation"] = evaluate_segmentation(model, ct_test, ct_train, a.ct_root, a.seg_nsd_tolerance_mm)
-    if "restoration" in a.tasks: result["tasks"]["restoration"] = evaluate_paired(model, ct_test, ct_train, a.ct_root, "restoration")
-    if "synthesis" in a.tasks: result["tasks"]["synthesis"] = evaluate_paired(model, synth_test, synth_train, a.synth_root, "synthesis")
+    if "segmentation" in a.tasks: result["tasks"]["segmentation"] = evaluate_segmentation(model, ct_test, ct_train, a.ct_root, ct_train_root, a.seg_nsd_tolerance_mm)
+    if "restoration" in a.tasks: result["tasks"]["restoration"] = evaluate_paired(model, ct_test, ct_train, a.ct_root, ct_train_root, "restoration")
+    if "synthesis" in a.tasks: result["tasks"]["synthesis"] = evaluate_paired(model, synth_test, synth_train, a.synth_root, synth_train_root, "synthesis")
     a.output.parent.mkdir(parents=True, exist_ok=True); a.output.write_text(json.dumps(result, indent=2) + "\n")
 
 
