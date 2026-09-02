@@ -50,6 +50,11 @@ def main() -> None:
                         help="After --resume, consolidate ZeRO optimizer state into a world-size-independent checkpoint and exit")
     parser.add_argument("--limit-train-cases",type=int,help="Deterministic tiny-set overfit check")
     parser.add_argument("--run-name",help="Override experiment name to isolate probes from formal outputs")
+    parser.add_argument(
+        "--task-sampling-ratio", nargs="+", metavar="TASK=WEIGHT",
+        help="Exact positive integer task ratio, e.g. segmentation=3 restoration=1 "
+             "reconstruction=1 synthesis=1 generation=1.",
+    )
     args=parser.parse_args(); config=load_experiment_config(args.config); train=config["train"]
     if args.run_name: config["experiment"]["name"] = args.run_name
     distributed = int(os.environ.get("WORLD_SIZE", "1")) > 1
@@ -99,21 +104,44 @@ def main() -> None:
                                         broadcast_buffers=False, find_unused_parameters=False,
                                         gradient_as_bucket_view=True)
     tasks=tuple(config["experiment"]["tasks"])
+    ratios=dict(config["experiment"].get("task_sampling_ratio",train["task_sampling_ratio"]))
+    if args.task_sampling_ratio:
+        parsed: dict[str, float] = {}
+        for item in args.task_sampling_ratio:
+            if "=" not in item:
+                parser.error(f"Invalid --task-sampling-ratio item: {item!r}")
+            task, value = item.split("=", 1)
+            try:
+                parsed[task] = float(value)
+            except ValueError:
+                parser.error(f"Invalid task sampling weight: {item!r}")
+        if set(parsed) != set(tasks):
+            parser.error(f"Task ratio must specify exactly {list(tasks)}")
+        ratios = parsed
+        config["experiment"]["task_sampling_ratio"] = ratios
+    ratio_counts: dict[str, int] = {}
+    for task in tasks:
+        weight=float(ratios.get(task, 0.0))
+        count=int(weight)
+        if weight <= 0 or count != weight:
+            parser.error("Task sampling weights must be positive integers for an exact schedule")
+        ratio_counts[task] = count
+    task_schedule=tuple(task for task in tasks for _ in range(ratio_counts[task]))
     audit_multitask_splits(config["data"], tasks)
-    ratios=config["experiment"].get("task_sampling_ratio",train["task_sampling_ratio"])
-    if any(float(ratios[task]) != float(ratios[tasks[0]]) for task in tasks):
-        raise ValueError("The formal five-task run requires exact equal task weights")
     num_samples=int(train["max_steps"])*int(train["batch_size"])*int(train["gradient_accumulation_steps"])*world_size
-    per_task_samples=(num_samples + len(tasks) - 1) // len(tasks)
+    per_task_samples={
+        task: (num_samples * ratio_counts[task] + len(task_schedule) - 1) // len(task_schedule)
+        for task in tasks
+    }
     task_datasets = {
         task: build_task_dataset(
             config["data"], task, "train", seed=int(train["seed"]),
-            num_samples=(min(per_task_samples, int(args.limit_train_cases))
-                         if args.limit_train_cases else per_task_samples),
+            num_samples=(min(per_task_samples[task], int(args.limit_train_cases))
+                         if args.limit_train_cases else per_task_samples[task]),
         )
         for task in tasks
     }
-    dataset=BalancedMultiTaskDataset(task_datasets, tasks, num_samples)
+    dataset=BalancedMultiTaskDataset(task_datasets, task_schedule, num_samples)
     optimizer=build_optimizer(model,train)
     codec=MedicalVolumeCodec(vae)
     objective = str(train.get("objective", "rectified_flow_matching"))

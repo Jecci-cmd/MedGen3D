@@ -326,7 +326,12 @@ class ManifestVolumeDataset(Dataset[dict[str, Any]]):
 
 
 class BalancedMultiTaskDataset(Dataset[dict[str, Any]]):
-    """Exact round-robin task balancing over independent task datasets."""
+    """Repeat an exact task schedule over independent task datasets.
+
+    ``tasks`` may contain a task more than once.  This makes an integer task
+    ratio explicit (for example ``seg, seg, seg, restoration, ...``) while
+    still advancing the repeated task's underlying dataset for every slot.
+    """
 
     def __init__(self, datasets: dict[str, Dataset], tasks: Sequence[str], num_samples: int) -> None:
         self.tasks = tuple(tasks)
@@ -338,14 +343,20 @@ class BalancedMultiTaskDataset(Dataset[dict[str, Any]]):
             raise ValueError("num_samples must be positive")
         if any(len(dataset) <= 0 for dataset in self.datasets.values()):
             raise ValueError("Every task dataset must be non-empty")
+        self.task_counts = {task: self.tasks.count(task) for task in self.datasets}
+        seen: dict[str, int] = {task: 0 for task in self.datasets}
+        self.task_offsets: list[int] = []
+        for task in self.tasks:
+            self.task_offsets.append(seen[task])
+            seen[task] += 1
 
     def __len__(self) -> int:
         return self.num_samples
 
     def __getitem__(self, index: int) -> dict[str, Any]:
-        task_index = index % len(self.tasks)
+        cycle, task_index = divmod(index, len(self.tasks))
         task = self.tasks[task_index]
-        within_task_index = index // len(self.tasks)
+        within_task_index = cycle * self.task_counts[task] + self.task_offsets[task_index]
         return self.datasets[task][within_task_index]
 
 
