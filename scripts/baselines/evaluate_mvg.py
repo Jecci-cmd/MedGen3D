@@ -162,7 +162,10 @@ def args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--mvg-root", type=Path, required=True); p.add_argument("--checkpoint", type=Path, required=True)
     p.add_argument("--ct-root", type=Path, required=True, help="Root for the evaluated CT cohort."); p.add_argument("--ct-train-root", type=Path, help="Root for fixed ID support slices (default: --ct-root)")
-    p.add_argument("--ct-test-manifest", type=Path, required=True); p.add_argument("--ct-train-manifest", type=Path, required=True)
+    p.add_argument("--ct-test-manifest", type=Path, required=True, help="Fallback CT test manifest for both CT tasks.")
+    p.add_argument("--seg-test-manifest", type=Path, help="Optional segmentation-specific CT test manifest.")
+    p.add_argument("--restoration-test-manifest", type=Path, help="Optional restoration-specific CT test manifest.")
+    p.add_argument("--ct-train-manifest", type=Path, required=True)
     p.add_argument("--synth-root", type=Path, required=True, help="Root for the evaluated synthesis cohort."); p.add_argument("--synth-train-root", type=Path, help="Root for fixed ID support slices (default: --synth-root)")
     p.add_argument("--synth-test-manifest", type=Path, required=True); p.add_argument("--synth-train-manifest", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True); p.add_argument("--tasks", nargs="+", default=["segmentation", "restoration", "synthesis"])
@@ -174,13 +177,15 @@ def args() -> argparse.Namespace:
 def main() -> None:
     a = args(); model = Predictor(a)
     ct_test, ct_train = read_jsonl(a.ct_test_manifest), read_jsonl(a.ct_train_manifest)
+    seg_test = read_jsonl(a.seg_test_manifest) if a.seg_test_manifest else ct_test
+    restoration_test = read_jsonl(a.restoration_test_manifest) if a.restoration_test_manifest else ct_test
     synth_test, synth_train = read_jsonl(a.synth_test_manifest), read_jsonl(a.synth_train_manifest)
     ct_train_root, synth_train_root = a.ct_train_root or a.ct_root, a.synth_train_root or a.synth_root
     if a.max_cases:
-        ct_test, synth_test = ct_test[:a.max_cases], synth_test[:a.max_cases]
+        seg_test, restoration_test, synth_test = seg_test[:a.max_cases], restoration_test[:a.max_cases], synth_test[:a.max_cases]
     result: dict[str, Any] = {"checkpoint": str(a.checkpoint), "tasks": {}}
-    if "segmentation" in a.tasks: result["tasks"]["segmentation"] = evaluate_segmentation(model, ct_test, ct_train, a.ct_root, ct_train_root, a.seg_nsd_tolerance_mm)
-    if "restoration" in a.tasks: result["tasks"]["restoration"] = evaluate_paired(model, ct_test, ct_train, a.ct_root, ct_train_root, "restoration")
+    if "segmentation" in a.tasks: result["tasks"]["segmentation"] = evaluate_segmentation(model, seg_test, ct_train, a.ct_root, ct_train_root, a.seg_nsd_tolerance_mm)
+    if "restoration" in a.tasks: result["tasks"]["restoration"] = evaluate_paired(model, restoration_test, ct_train, a.ct_root, ct_train_root, "restoration")
     if "synthesis" in a.tasks: result["tasks"]["synthesis"] = evaluate_paired(model, synth_test, synth_train, a.synth_root, synth_train_root, "synthesis")
     a.output.parent.mkdir(parents=True, exist_ok=True); a.output.write_text(json.dumps(result, indent=2) + "\n")
 
