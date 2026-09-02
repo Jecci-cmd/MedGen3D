@@ -175,7 +175,13 @@ def build_model(device: torch.device, checkpoint: Path, CTCLIP: type[Any], CTViT
                        dim_image=294_912, dim_text=768, dim_latent=512).to(device)
     finally:
         BertTokenizer.from_pretrained = original_tokenizer_loader  # type: ignore[method-assign]
-    model.load(str(checkpoint))
+    # Older CT-CLIP checkpoints persist BERT's deterministic ``position_ids``
+    # buffer.  Recent transformers versions register that buffer as
+    # non-persistent, so strict loading otherwise rejects this one derived key.
+    # It is not a learned parameter and is recreated by BertEmbeddings.
+    state_dict = torch.load(str(checkpoint), map_location=device)
+    state_dict.pop("text_transformer.embeddings.position_ids", None)
+    model.load_state_dict(state_dict, strict=True)
     return model.eval()
 
 
