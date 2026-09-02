@@ -37,8 +37,15 @@ def main() -> None:
         path = Path(inverse["target_path"])
         image = nib.load(str(path))
         zooms = image.header.get_zooms()
+        # BIMCV-R has a known factor-100 error in the NIfTI z pixdim for a
+        # subset of scans (e.g. 240.001 mm instead of 2.40001 mm).  Restrict
+        # the correction to the unmistakable outlier pattern; normal scans
+        # retain their native geometry exactly.
+        z_spacing = float(zooms[2])
+        if z_spacing > 20.0 and 0.2 <= float(zooms[0]) <= 2.0:
+            z_spacing /= 100.0
         slope, intercept = image.header.get_slope_inter()
-        rows.append({"VolumeName": case_id, "ZSpacing": float(zooms[2]),
+        rows.append({"VolumeName": case_id, "ZSpacing": z_spacing,
                      "XYSpacing": f"({float(zooms[0])}, {float(zooms[1])})",
                      "RescaleSlope": 1.0 if slope is None else float(slope),
                      "RescaleIntercept": 0.0 if intercept is None else float(intercept)})

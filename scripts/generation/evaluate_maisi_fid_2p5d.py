@@ -72,9 +72,35 @@ def finish_distributed(world: int) -> None:
 
 
 def build_transform(shape: tuple[int, int, int]) -> Compose:
+    class CorrectCorruptedBIMCVZSpacingd(monai.transforms.MapTransform):
+        """Repair the documented BIMCV-R header error before physical resampling.
+
+        A small subset of BIMCV-R NIfTIs stores a 1.86--3.72 mm slice
+        spacing as 186--372 mm.  Their in-plane spacing remains normal, so
+        this is unambiguously a factor-100 header error rather than anatomy.
+        Correcting it here keeps the MAISI 1 mm preprocessing physical while
+        leaving all normally encoded volumes untouched.
+        """
+
+        def __call__(self, data: object) -> object:
+            result = dict(data)  # type: ignore[arg-type]
+            for key in self.keys:
+                image = result[key]
+                affine = image.affine.clone()
+                spacing_z = float(torch.linalg.vector_norm(affine[:3, 2]))
+                spacing_xy = float(torch.linalg.vector_norm(affine[:3, 0]))
+                if spacing_z > 20.0 and 0.2 <= spacing_xy <= 2.0:
+                    affine[:3, 2] /= 100.0
+                    image.affine = affine
+                    image.meta["affine"] = affine
+                    image.meta["pixdim"][3] = spacing_z / 100.0
+                result[key] = image
+            return result
+
     return Compose([
         monai.transforms.LoadImaged(keys="image"),
         monai.transforms.EnsureChannelFirstd(keys="image"),
+        CorrectCorruptedBIMCVZSpacingd(keys="image"),
         monai.transforms.Orientationd(keys="image", axcodes="RAS"),
         monai.transforms.Spacingd(keys="image", pixdim=(1.0, 1.0, 1.0), mode="bilinear"),
         monai.transforms.SpatialPadd(keys="image", spatial_size=shape, mode="constant", value=-1000),
