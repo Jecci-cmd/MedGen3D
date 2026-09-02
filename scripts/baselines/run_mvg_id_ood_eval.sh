@@ -29,3 +29,6 @@ export PYTHONPATH="$REPO/src:$MVG${PYTHONPATH:+:$PYTHONPATH}"
   --restoration-test-manifest "$OOD/dap_atlas_ood/manifests/restoration_ood_test.jsonl" --ct-train-manifest "$CT_ID/processed/manifests/train.jsonl" \
   --synth-root "$OOD/brats_peds_t1n_t2w" --synth-train-root "$SYNTH_ID" \
   --synth-test-manifest "$OOD/brats_peds_t1n_t2w/manifests/ood_test.jsonl" --synth-train-manifest "$SYNTH_ID/manifests/train.jsonl"
+
+"$PY" "$REPO/scripts/baselines/summarize_mvg_metrics.py" \
+  --id "$OUT/id_metrics.json" --ood "$OUT/ood_metrics.json" --output "$OUT/paper_rows.tex" --label "MVG"
