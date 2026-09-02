@@ -30,7 +30,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from scipy.linalg import sqrtm
-from transformers import BertModel
+from transformers import BertConfig, BertModel
 
 
 PROTOCOL = "ctrate_v2_ctclip_fvd_t2i_i2i_v1"
@@ -149,8 +149,12 @@ def ctclip_tensor(path: Path, *, slope: float, intercept: float, z_spacing: floa
 
 def build_model(device: torch.device, checkpoint: Path, CTCLIP: type[Any], CTViT: Any) -> Any:
     if not (DEFAULT_CXR_BERT / "config.json").is_file():
-        raise FileNotFoundError(f"Missing fixed BiomedVLP CXR-BERT asset: {DEFAULT_CXR_BERT}")
-    text_encoder = BertModel.from_pretrained(str(DEFAULT_CXR_BERT), local_files_only=True).to(device)
+        raise FileNotFoundError(f"Missing fixed BiomedVLP CXR-BERT config: {DEFAULT_CXR_BERT}")
+    # CT-CLIP_v2.pt contains all ``text_transformer.*`` parameters.  Build the
+    # documented CXR-BERT architecture from its local config and let
+    # ``model.load`` restore those checkpoint parameters, rather than silently
+    # fetching or mixing in an unrelated base-model weight file.
+    text_encoder = BertModel(BertConfig.from_pretrained(str(DEFAULT_CXR_BERT), local_files_only=True)).to(device)
     image_encoder = CTViT(dim=512, codebook_size=8192, image_size=480, patch_size=20,
                           temporal_patch_size=10, spatial_depth=4, temporal_depth=4,
                           dim_head=32, heads=8).to(device)
