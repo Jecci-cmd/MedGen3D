@@ -174,30 +174,24 @@ python scripts/evaluate_medgen3d.py \
 Evaluation can be sharded with `--num-shards N --shard-index I`; merge completed
 shards using `scripts/merge_evaluation_shards.py`. Metrics configured for the
 five tasks include Dice/NSD/HD95/ASSD, MAE/RMSE/PSNR/SSIM, and volumetric
-generation metrics. Generation first writes canonical NIfTI volumes; compute
-its three dataset-level metrics separately using the StyleGAN-V detectors and
-TorchMetrics CLIPScore:
-
-Generation's dataset-level metrics use the GenerateCT-referenced public
-implementations: StyleGAN-V's TensorFlow-compatible Inception detector for
-FID, StyleGAN-V's official FVD I3D detector for FVD-16, and TorchMetrics'
-CLIPScore for report--image alignment.  Place the downloaded
-`inception-2015-12-05.pkl` and `i3d_torchscript.pt` detector files on the
-evaluation machine, then run:
+generation metrics. Generation first writes canonical NIfTI volumes.  The
+generation protocol uses CT-CLIP whole-volume embeddings: FVD-CT (Fréchet
+distance between real and generated CT embeddings), report-to-image CT-CLIP
+(T2I), and real-to-generated CT-CLIP (I2I).  Clone CT-CLIP and provide its
+published checkpoint and the CT-RATE metadata CSV, then run:
 
 ```bash
-python scripts/generation/evaluate_generation_metrics.py \
+python scripts/generation/evaluate_ctclip_metrics.py \
   --results outputs/evaluation/results.json \
-  --fid-detector /path/to/inception-2015-12-05.pkl \
-  --i3d-model /path/to/i3d_torchscript.pt \
-  --output outputs/evaluation/generation_metrics.json
+  --metadata-csv /path/to/ct_rate_validation_metadata.csv \
+  --ctclip-root /path/to/CT-CLIP \
+  --ctclip-checkpoint /path/to/CT-CLIP_v2.pt \
+  --output outputs/evaluation/ctclip_metrics.json
 ```
 
-CT volumes are clipped to `[-1000, 1000]` HU and converted to uint8 RGB axial
-frames. FID uses all axial frames; FVD uses 16 uniformly sampled axial frames;
-and `CLIPScore` is the mean TorchMetrics text--image score over axial frames.
-The former two CT-CLIP columns are intentionally superseded by the one
-`CLIPScore` field.
+Each volume is resampled to CT-CLIP's physical grid `(1.5, 0.75, 0.75)`,
+centre-cropped/padded to `480 x 480 x 240`, and clipped to `[-1000, 1000]` HU.
+The evaluator records FVD-CT, T2I, I2I, and their clamped T2I/I2I mean.
 
 ## Experiment protocol
 
