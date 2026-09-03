@@ -18,6 +18,7 @@ import nibabel as nib
 import numpy as np
 import torch
 import torch.nn.functional as F
+from scipy import ndimage
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from medgen3d.evaluation import (  # noqa: E402  # pragma: no cover
@@ -77,6 +78,17 @@ def decode(tensor: torch.Tensor, mode: str, shape: tuple[int, int]) -> np.ndarra
     return x
 
 
+def largest_connected_component(mask: np.ndarray) -> np.ndarray:
+    """Retain the largest 26-connected foreground component of a 3-D mask."""
+    mask = mask.astype(bool, copy=False)
+    labels, count = ndimage.label(mask, structure=np.ones((3, 3, 3), dtype=np.uint8))
+    if count == 0:
+        return mask
+    sizes = np.bincount(labels.ravel())
+    sizes[0] = 0
+    return labels == int(sizes.argmax())
+
+
 class Predictor:
     def __init__(self, args: argparse.Namespace) -> None:
         sys.path.insert(0, str(args.mvg_root))
@@ -125,7 +137,7 @@ def fixed_pair(row: dict[str, Any], root: Path, task: str) -> tuple[np.ndarray, 
 
 
 def evaluate_segmentation(pred: Predictor, test: list[dict[str, Any]], train: list[dict[str, Any]], test_root: Path, train_root: Path,
-                          tolerance: float) -> dict[str, Any]:
+                          tolerance: float, postprocess: str) -> dict[str, Any]:
     supports = {label: first_seg_support(train, train_root, label) for label in LABELS}
     rows = []
     for index, row in enumerate(test):
@@ -133,10 +145,21 @@ def evaluate_segmentation(pred: Predictor, test: list[dict[str, Any]], train: li
         source, target = load(resolve(test_root, row["image"])), load(resolve(test_root, row["mask"]))
         sx, sy = supports[label]
         raw = pred.predict(encode(sx, "ct"), encode(sy, "seg"), source, "ct", "seg")
-        output = raw > 5.0
+        raw_output = raw > 5.0
+        output = largest_connected_component(raw_output) if postprocess == "largest_component" else raw_output
         spacing_xyz = row.get("spacing_xyz_mm", [1.5, 1.5, 1.5])
         metric = segmentation_metrics(output, target == label, tuple(reversed(tuple(map(float, spacing_xyz)))), tolerance)
-        rows.append({"index": index, "case_id": row["case_id"], "structure": LABELS[label], "metrics": metric})
+        raw_metric = segmentation_metrics(raw_output, target == label, tuple(reversed(tuple(map(float, spacing_xyz)))), tolerance)
+        rows.append({
+            "index": index,
+            "case_id": row["case_id"],
+            "structure": LABELS[label],
+            "metrics": metric,
+            "raw_metrics": raw_metric,
+            "postprocess": postprocess,
+            "raw_prediction_voxels": int(raw_output.sum()),
+            "prediction_voxels": int(output.sum()),
+        })
         print(json.dumps({"task": "segmentation", "index": index, "case_id": row["case_id"], "dice": metric["dice"]}), flush=True)
     return {"rows": rows, "summary": summarize_segmentation_by_class(rows)}
 
@@ -174,7 +197,10 @@ def args() -> argparse.Namespace:
     p.add_argument("--synth-test-manifest", type=Path, required=True); p.add_argument("--synth-train-manifest", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True); p.add_argument("--tasks", nargs="+", default=["segmentation", "restoration", "synthesis"])
     p.add_argument("--max-cases", type=int, default=0, help="Optional smoke-test cap; zero evaluates every frozen case.")
-    p.add_argument("--seg-nsd-tolerance-mm", type=float, default=3.0); p.add_argument("--batch-size", type=int, default=2); p.add_argument("--device", default="cuda")
+    p.add_argument("--seg-nsd-tolerance-mm", type=float, default=3.0)
+    p.add_argument("--seg-postprocess", choices=("none", "largest_component"), default="none",
+                   help="Optional test-label-free binary-mask postprocessing; raw metrics remain in every row for audit.")
+    p.add_argument("--batch-size", type=int, default=2); p.add_argument("--device", default="cuda")
     return p.parse_args()
 
 
@@ -188,7 +214,11 @@ def main() -> None:
     if a.max_cases:
         seg_test, restoration_test, synth_test = seg_test[:a.max_cases], restoration_test[:a.max_cases], synth_test[:a.max_cases]
     result: dict[str, Any] = {"checkpoint": str(a.checkpoint), "tasks": {}}
-    if "segmentation" in a.tasks: result["tasks"]["segmentation"] = evaluate_segmentation(model, seg_test, ct_train, a.ct_root, ct_train_root, a.seg_nsd_tolerance_mm)
+    if "segmentation" in a.tasks:
+        result["tasks"]["segmentation"] = evaluate_segmentation(
+            model, seg_test, ct_train, a.ct_root, ct_train_root,
+            a.seg_nsd_tolerance_mm, a.seg_postprocess,
+        )
     if "restoration" in a.tasks: result["tasks"]["restoration"] = evaluate_paired(model, restoration_test, ct_train, a.ct_root, ct_train_root, "restoration")
     if "synthesis" in a.tasks: result["tasks"]["synthesis"] = evaluate_paired(model, synth_test, synth_train, a.synth_root, synth_train_root, "synthesis")
     a.output.parent.mkdir(parents=True, exist_ok=True); a.output.write_text(json.dumps(result, indent=2) + "\n")
