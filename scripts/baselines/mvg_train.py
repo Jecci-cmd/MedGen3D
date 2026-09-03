@@ -238,6 +238,10 @@ def main() -> None:
     raw_model = model.module if world > 1 else model
     groups = lr_decay.param_groups_lrd(raw_model, args.weight_decay, raw_model.no_weight_decay(), 0.8)
     optimizer = torch.optim.AdamW(groups, lr=args.lr, betas=(0.9, 0.999))
+    if args.resume and "optimizer" in checkpoint:
+        optimizer.load_state_dict(checkpoint["optimizer"])
+        if rank == 0:
+            print(f"Resumed optimizer state from epoch {checkpoint['epoch']}", flush=True)
     scaler = torch.amp.GradScaler("cuda")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     log_path = args.output_dir / "train_log.jsonl"
