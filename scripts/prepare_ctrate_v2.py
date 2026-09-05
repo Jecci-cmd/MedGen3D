@@ -28,9 +28,18 @@ def patient_id(name: str) -> str:
 
 
 def report_text(row: pd.Series) -> str:
-    findings = str(row.get("Findings_EN", row.get("Findings", ""))).strip()
-    impression = str(row.get("Impressions_EN", row.get("Impression", ""))).strip()
-    return f"Findings: {findings}\nImpression: {impression}".strip()
+    parts = []
+    for label, names in (("Findings", ("Findings_EN", "Findings")),
+                         ("Impression", ("Impressions_EN", "Impression"))):
+        value = next((row.get(name) for name in names if name in row.index), "")
+        if pd.isna(value):
+            continue
+        text = str(value).strip()
+        if text and text.casefold() not in {"nan", "none", "null", "n/a"}:
+            parts.append(f"{label}: {text}")
+    if not parts:
+        raise ValueError("CT-RATE record has no usable report text")
+    return "\n".join(parts)
 
 
 def select_one(table: pd.DataFrame, count: int, seed: int) -> pd.DataFrame:
@@ -67,7 +76,12 @@ def crop_or_pad_xy(image: nib.Nifti1Image, xy_shape: tuple[int, int]) -> nib.Nif
 
 def canonicalize(source: Path, spacing: float, xy_shape: tuple[int, int]) -> nib.Nifti1Image:
     image = nib.as_closest_canonical(nib.load(source))
-    image = resample_to_output(image, voxel_sizes=(spacing, spacing, spacing), order=1)
+    # Outside the source FOV is air, not water.  Keeping this explicit is
+    # important because body detection below uses a HU threshold.
+    image = resample_to_output(
+        image, voxel_sizes=(spacing, spacing, spacing), order=1,
+        mode="constant", cval=-1000.0,
+    )
     image = crop_or_pad_xy(image, xy_shape)
     if "".join(nib.aff2axcodes(image.affine)) != "RAS":
         raise AssertionError("Canonical image is not RAS")

@@ -402,6 +402,7 @@ def build_task_dataset(
             resize_xy=data.get("resize_xy"),
             sliding_window_depth=data.get("sliding_window", {}).get("depth"),
             sliding_window_stride=data.get("sliding_window", {}).get("stride"),
+            whole_volume=whole_volume,
             hu_clip=data["hu_clip"], output_range=data["ct_normalization"]["output_range"],
             spatial_flip_probability=(data.get("spatial_flip_probability", .5) if split == "train" else 0.0),
             seed=seed, num_samples=num_samples,
@@ -480,6 +481,7 @@ class DynamicCaseDataset(Dataset[dict[str, Any]]):
         resize_xy: Sequence[int] | None = None,
         sliding_window_depth: int | None = None,
         sliding_window_stride: int | None = None,
+        whole_volume: bool = False,
         hu_clip: Sequence[float] = (-1000.0, 1000.0),
         output_range: Sequence[float] = (-1.0, 1.0),
         spatial_flip_probability: float = 0.5,
@@ -502,7 +504,8 @@ class DynamicCaseDataset(Dataset[dict[str, Any]]):
         self.sliding_window_depth = (int(sliding_window_depth)
                                      if sliding_window_depth is not None else None)
         self.sliding_window_stride = (int(sliding_window_stride)
-                                      if sliding_window_stride is not None else None)
+                                     if sliding_window_stride is not None else None)
+        self.whole_volume = bool(whole_volume)
         if self.resize_xy is not None:
             if len(self.resize_xy) != 2 or any(value <= 0 for value in self.resize_xy):
                 raise ValueError("resize_xy must contain two positive integers")
@@ -886,6 +889,7 @@ class DynamicCaseDataset(Dataset[dict[str, Any]]):
         zoom_scale_zyx = (1.0, 1.0, 1.0)
         source_patch_shape = self.patch_shape
         recomputed_zoom_sdf = False
+        source_shape_dhw = tuple(int(x) for x in clean.shape)
         if task == "segmentation":
             condition_volume = clean
             classes = [int(x) for x in record["sdf_classes"]]
@@ -941,9 +945,10 @@ class DynamicCaseDataset(Dataset[dict[str, Any]]):
                 # Cover prompted organs deterministically across a held-out
                 # evaluation set.  The previous `classes[0]` rule silently
                 # evaluated only the aorta for every patient.
-                if not present:
-                    raise ValueError(f"No evaluation class is present in {record['case_id']}")
-                class_id = present[index % len(present)]
+                # Evaluation class selection must not inspect the GT mask.
+                # Cycle through the fixed label inventory; absent organs simply
+                # produce an empty-target case and are scored normally.
+                class_id = classes[index % len(classes)]
             target_mask = label == class_id
             sdf = _load_array(self.root, record["sdf"])
             channel = classes.index(class_id)
@@ -970,22 +975,38 @@ class DynamicCaseDataset(Dataset[dict[str, Any]]):
                     target_mask.shape[0], self.sliding_window_depth,
                     self.sliding_window_stride,
                 )
-                eligible_starts = tuple(
-                    value for value in all_starts
-                    if int(target_mask[value:value + self.sliding_window_depth].sum())
-                    >= self.segmentation_min_foreground_voxels
-                )
-                if not eligible_starts:
-                    raise RuntimeError(
-                        f"No z-window contains enough foreground for {record['case_id']} "
-                        f"class {class_id}"
+                if self.whole_volume:
+                    start = (0, 0, 0)
+                    target_foreground_voxels = int(target_mask.sum())
+                    sampling_mode = "whole_volume_image_only"
+                    all_starts = ()
+                elif self.training:
+                    eligible_starts = tuple(
+                        value for value in all_starts
+                        if int(target_mask[value:value + self.sliding_window_depth].sum())
+                        >= self.segmentation_min_foreground_voxels
                     )
-                window_cycle = index // max(1, len(self.records))
-                start = (eligible_starts[window_cycle % len(eligible_starts)], 0, 0)
-                target_foreground_voxels = int(
-                    target_mask[start[0]:start[0] + self.sliding_window_depth].sum()
-                )
-                sampling_mode = "z_sliding_window_foreground"
+                    if not eligible_starts:
+                        raise RuntimeError(
+                            f"No z-window contains enough foreground for {record['case_id']} "
+                            f"class {class_id}"
+                        )
+                    window_cycle = index // max(1, len(self.records))
+                    z_start = eligible_starts[window_cycle % len(eligible_starts)]
+                    sampling_mode = "z_sliding_window_foreground"
+                    start = (z_start, 0, 0)
+                    target_foreground_voxels = int(
+                        target_mask[z_start:z_start + self.sliding_window_depth].sum()
+                    )
+                else:
+                    # Test uses an image-independent central/complete scan
+                    # window; no GT-dependent window filtering.
+                    z_start = all_starts[len(all_starts) // 2]
+                    sampling_mode = "z_sliding_window_center"
+                    start = (z_start, 0, 0)
+                    target_foreground_voxels = int(
+                        target_mask[z_start:z_start + self.sliding_window_depth].sum()
+                    )
             else:
                 start, target_foreground_voxels, sampling_mode = self._segmentation_patch_start(
                     target_mask, target_sdf, rng,
@@ -1025,22 +1046,27 @@ class DynamicCaseDataset(Dataset[dict[str, Any]]):
 
         if self.resize_xy is not None:
             z_start = start[0]
-            condition = _crop_or_pad_depth(
-                condition_volume, z_start, self.sliding_window_depth, -1000
-            )
+            if self.whole_volume:
+                condition = condition_volume
+                target = target_volume
+                valid = np.ones(label.shape, np.float32)
+            else:
+                condition = _crop_or_pad_depth(
+                    condition_volume, z_start, self.sliding_window_depth, -1000
+                )
+                target_fill = (0 if self.segmentation_target == "mask" else
+                               (-1 if task == "segmentation" else -1000))
+                target = _crop_or_pad_depth(
+                    target_volume, z_start, self.sliding_window_depth, target_fill
+                )
+                valid = _crop_or_pad_depth(
+                    np.ones(label.shape, np.float32), z_start, self.sliding_window_depth, 0
+                )
             condition = _resize_xy(condition, self.resize_xy, "bilinear")
-            target_fill = (0 if self.segmentation_target == "mask" else
-                           (-1 if task == "segmentation" else -1000))
-            target = _crop_or_pad_depth(
-                target_volume, z_start, self.sliding_window_depth, target_fill
-            )
             target = _resize_xy(
                 target, self.resize_xy,
                 "nearest" if task == "segmentation" and self.segmentation_target == "mask"
                 else "bilinear",
-            )
-            valid = _crop_or_pad_depth(
-                np.ones(label.shape, np.float32), z_start, self.sliding_window_depth, 0
             )
             valid = _resize_xy(valid, self.resize_xy, "nearest")
             actual_foreground = (int((_resize_xy(
@@ -1094,7 +1120,7 @@ class DynamicCaseDataset(Dataset[dict[str, Any]]):
                 label == class_id, start, self.patch_shape, fill_value=0
             ).sum()) if task == "segmentation" else 0)
         if task == "segmentation":
-            if actual_foreground <= 0:
+            if actual_foreground <= 0 and self.training:
                 raise RuntimeError(
                     f"Segmentation patch invariant failed for {record['case_id']} class {class_id}"
                 )
@@ -1124,6 +1150,7 @@ class DynamicCaseDataset(Dataset[dict[str, Any]]):
             "target": torch.from_numpy(np.asarray(target, np.float32)),
             "prompt": prompt, "valid_mask": torch.from_numpy(np.asarray(valid, np.float32)),
             "metadata": {**record.get("metadata", {}), "split": self.split,
+                         "source_shape_dhw": list(source_shape_dhw),
                          **balance_metadata,
                          "crop_start_zyx": start, "configuration": configuration,
                          "resize_xy": self.resize_xy,

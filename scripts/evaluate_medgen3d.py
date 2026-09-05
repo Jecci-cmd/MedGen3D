@@ -178,13 +178,13 @@ def main() -> None:
             raise RuntimeError(f"Refusing to resume incompatible partial result: {partial_path}")
         rows = list(partial.get("rows", []))
     completed = {(row["task"], int(row["index"])) for row in rows}
-    spacing_zyx = tuple(float(x) for x in reversed(data["target_spacing_xyz_mm"]))
+    base_spacing_zyx = tuple(float(x) for x in reversed(data["target_spacing_xyz_mm"]))
 
     for task in args.tasks:
         # Dataset-level volume metrics require a prediction over exactly the
         # same complete volume as the target.  A single synthesis patch cannot
         # be resized to an entire subject without invalidating MAE/PSNR/SSIM.
-        full_volume = task == "generation" or (
+        full_volume = task in {"segmentation", "generation"} or (
             task == "synthesis" and objective == "feed_forward_latent_regression"
         )
         dataset = build_task_dataset(
@@ -196,11 +196,22 @@ def main() -> None:
                 print(json.dumps({"skipped_completed": True, "task": task, "index": index}), flush=True)
                 continue
             sample = dataset[index]
+            spacing_zyx = base_spacing_zyx
+            resize_xy = sample.get("metadata", {}).get("resize_xy")
+            source_shape = sample.get("metadata", {}).get("source_shape_dhw")
+            if resize_xy and source_shape:
+                # XY resizing changes the physical spacing represented by each
+                # output voxel; z is unchanged.
+                spacing_zyx = (
+                    base_spacing_zyx[0],
+                    base_spacing_zyx[1] * float(source_shape[-2]) / float(resize_xy[0]),
+                    base_spacing_zyx[2] * float(source_shape[-1]) / float(resize_xy[1]),
+                )
             condition = sample["condition"].unsqueeze(0).to(device)
             reconstruction_views = sample.get("metadata", {}).get("reconstruction_views")
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 if objective == "feed_forward_latent_regression":
-                    if task in {"generation", "synthesis"}:
+                    if task in {"segmentation", "generation", "synthesis"}:
                         prediction = predict_feed_forward_sliding_volume(
                             condition, sample["prompt"], vae, text_encoder, model,
                             window_depth=int(data["patch_size_dhw"][0]),
