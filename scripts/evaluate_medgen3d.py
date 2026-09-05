@@ -44,6 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--samples-per-task", type=int, default=1)
     parser.add_argument("--sampling-steps", type=int, default=30)
     parser.add_argument("--seed", type=int, default=20260812)
+    parser.add_argument("--nsd-tolerance-mm", type=float, default=1.0)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--tasks", nargs="+", choices=TASKS, default=list(TASKS))
     parser.add_argument("--num-shards", type=int, default=1)
@@ -253,7 +254,10 @@ def main() -> None:
             artifact = output_dir / "artifacts" / task / f"{case_id}_{index:03d}.png"
 
             if task == "segmentation":
-                metrics = segmentation_metrics(pred[crop] < 0, target[crop] < 0, spacing_zyx)
+                metrics = segmentation_metrics(
+                    pred[crop] < 0, target[crop] < 0, spacing_zyx,
+                    nsd_tolerance_mm=args.nsd_tolerance_mm,
+                )
                 save_segmentation_overlay(condition_np, pred < 0, target < 0, artifact)
             elif task in {"restoration", "reconstruction"}:
                 pred_hu = denormalize(pred, data["hu_clip"])
